@@ -1,0 +1,473 @@
+# Maintainer: anland project
+# Contributor: pad
+#
+# AUR package: weston-anland-git
+#
+# Builds Weston from the anland monorepo (weston/ subdirectory)
+# with only the anland backend enabled (KGSL/adreno zero-copy).
+#
+# Build:
+#   makepkg -s
+
+pkgname=weston-anland-git
+pkgver=15.0.90.r26.ge91bfff
+pkgrel=1
+pkgdesc="Weston compositor with anland zero-copy display backend (KGSL/adreno)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/superturtlee/anland"
+license=('MIT')
+
+# ── install hook ─────────────────────────────────────────────────
+install="${pkgname}.install"
+
+# ── conflicts: cannot coexist with official weston ───────────────
+provides=("weston=${pkgver}")
+conflicts=('weston')
+
+# ── runtime dependencies ────────────────────────────────────────
+depends=(
+    'wayland'
+    'pixman'
+    'libxkbcommon'
+    'libinput'
+    'libevdev'          # direct dep, not just transitive via libinput
+    'libdrm'
+    'mesa'              # EGL, GLES, gbm
+    'seatd'
+    'cairo'
+    'libjpeg-turbo'
+    'libwebp'
+    'libpng'
+    'pango'
+    'glib2'
+    'fontconfig'
+    'freetype2'
+    'hwdata'            # input device quirks database
+    'libdisplay-info'   # EDID/DisplayID parsing (linked by libweston)
+    'vulkan-icd-loader' # libvulkan.so + vulkan.pc (linked by vulkan renderer)
+)
+makedepends=(
+    'meson'
+    'ninja'
+    'pkgconf'
+    'git'
+    'wayland-protocols'
+    'glslang'
+    'vulkan-headers'    # compile vulkan renderer
+    'libxcb'            # xwayland module (xcb, xcb-composite, ...)
+    'libxcursor'        # xwayland module
+)
+optdepends=(
+    'xwayland: X11 client support'
+    'libxcb: needed by xwayland module'
+    'libxcursor: needed by xwayland module'
+)
+
+# ── source ──────────────────────────────────────────────────────
+source=("anland::git+https://github.com/superturtlee/anland.git")
+sha256sums=('SKIP')
+
+# ── pkgver() ────────────────────────────────────────────────────
+pkgver() {
+    cd "$srcdir/anland/weston"
+    local _ver
+    _ver=$(grep -m1 "version:" meson.build | sed "s/.*'\(.*\)'.*/\1/")
+    _ver="${_ver:-0.0.0}"    # fallback if grep fails
+
+    cd "$srcdir/anland"
+    local _rev _hash
+    _rev=$(git rev-list --count HEAD)
+    _hash=$(git rev-parse --short HEAD)
+
+    printf '%s.r%s.g%s' "$_ver" "$_rev" "$_hash"
+}
+
+# ── prepare() ───────────────────────────────────────────────────
+prepare() {
+    cd "$srcdir/anland/weston"
+
+    # Prevent meson from trying to download wrap dependencies.
+    # arch-meson already passes --wrap-mode=nodownload; this is
+    # belt-and-suspenders.
+    rm -f subprojects/edid-decode.wrap subprojects/display-info.wrap subprojects/.wraplock
+
+    # ── Create local wayland-protocols overlay ────────────────
+    # We need to override color-representation-v1.xml without
+    # touching the system wayland-protocols installation (which
+    # is not writable during makepkg build()).  The approach:
+    #   1. Build a local tree that symlinks every system protocol
+    #      except color-representation, which gets our override.
+    #   2. Create a modified .pc file pointing to this tree.
+    #   3. In build(), PKG_CONFIG_PATH makes meson discover the
+    #      modified .pc first; dep_wp.get_variable('pkgdatadir')
+    #      resolves to our local tree.
+
+    local sys_wp sys_pc local_wp local_pc name item
+
+    # Resolve system wayland-protocols paths (makedepends guarantees
+    # they are installed before prepare() runs).
+    sys_wp=$(pkgconf --variable=pkgdatadir wayland-protocols 2>/dev/null) || true
+    if [ -z "$sys_wp" ]; then
+        error "wayland-protocols: cannot resolve pkgdatadir via pkgconf"
+    fi
+    sys_pc=$(pkgconf --path wayland-protocols 2>/dev/null) || true
+    if [ -z "$sys_pc" ]; then
+        error "wayland-protocols: .pc file not found via pkgconf"
+    fi
+
+    local_wp="$srcdir/wayland-protocols-local"
+    local_pc="$srcdir/pkgconfig"
+    rm -rf "$local_wp" "$local_pc"
+    mkdir -p "$local_wp" "$local_pc"
+
+    msg2 "wayland-protocols overlay: $local_wp"
+
+    # ── Top-level directories we don't need to modify ─────────
+    for name in stable unstable; do
+        if [ -d "$sys_wp/$name" ]; then
+            ln -sf "$sys_wp/$name" "$local_wp/$name"
+        fi
+    done
+
+    # ── staging: override color-representation only ───────────
+    mkdir -p "$local_wp/staging"
+    for item in "$sys_wp/staging"/*; do
+        [ -e "$item" ] || continue
+        name=$(basename "$item")
+        if [ "$name" = "color-representation" ]; then
+            # Real directory with our override XML
+            mkdir -p "$local_wp/staging/color-representation"
+            cp -v "$srcdir/anland/wayland-protocols-override/staging/color-representation/color-representation-v1.xml" \
+                  "$local_wp/staging/color-representation/color-representation-v1.xml"
+        elif [ -d "$item" ]; then
+            ln -sf "$item" "$local_wp/staging/$name"
+        else
+            ln -sf "$item" "$local_wp/staging/$name"
+        fi
+    done
+
+    # ── Top-level files (e.g. wayland.dtd) ────────────────────
+    for item in "$sys_wp"/*; do
+        [ -e "$item" ] || continue
+        name=$(basename "$item")
+        case "$name" in stable|staging|unstable) continue ;; esac
+        ln -sf "$item" "$local_wp/$name"
+    done
+
+    # ── Patched .pc file ──────────────────────────────────────
+    sed "s|^pkgdatadir=.*|pkgdatadir=$local_wp|" "$sys_pc" \
+        > "$local_pc/wayland-protocols.pc"
+}
+
+# ── build() ─────────────────────────────────────────────────────
+build() {
+    cd "$srcdir/anland/weston"
+
+    # Make pkgconf pick up our modified wayland-protocols.pc first,
+    # so meson sees the local overlay instead of the system one.
+    export PKG_CONFIG_PATH="$srcdir/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
+    local meson_opts=(
+        --prefix=/usr
+        --libexecdir=/usr/lib
+        --sysconfdir=/etc
+
+        -Dbackend-drm=false
+        -Dbackend-headless=false
+        -Dbackend-pipewire=false
+        -Dbackend-rdp=false
+        -Dbackend-vnc=false
+        -Dbackend-wayland=false
+        -Dbackend-x11=false
+        -Dbackend-anland=true
+        -Dbackend-default=auto
+
+        -Drenderer-gl=true
+        -Drenderer-vulkan=true
+
+        -Dxwayland=true
+        -Dcolor-management-lcms=false
+        -Dimage-jpeg=true
+        -Dimage-webp=true
+
+        -Dshell-desktop=true
+        -Dshell-kiosk=true
+        -Dshell-ivi=false
+        -Dshell-lua=false
+
+        -Ddemo-clients=false
+        -Dsimple-clients=[]
+        -Dtools=terminal
+        -Dsystemd=false
+        -Dtests=false
+        -Ddoc=false
+        -Dperfetto=false
+        -Ddeprecated-remoting=false
+        -Ddeprecated-pipewire=false
+    )
+
+    arch-meson . build/ "${meson_opts[@]}"
+    meson compile -C build/
+}
+
+# ── package() ───────────────────────────────────────────────────
+package() {
+    cd "$srcdir/anland/weston"
+
+    # Derive libweston ABI major from source (not hardcoded).
+    local libweston_major
+    libweston_major=$(grep -m1 '^libweston_major = ' meson.build \
+                      | sed 's/^libweston_major = *//' \
+                      | tr -d '[:space:]')
+    if [ -z "$libweston_major" ]; then
+        error "Could not determine libweston major version from meson.build"
+    fi
+    msg2 "libweston major: $libweston_major"
+
+    DESTDIR="$pkgdir" meson install -C build/
+
+    # ── 1. anland-weston  (equivalent to build_and_install.sh start.sh) ──
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/anland-weston" << 'WESTON'
+#!/bin/bash
+SOCK="${1:-${ANLAND_SOCK:-/run/display.sock}}"
+
+# Module map — absolute paths to the anland backend and renderers.
+# @LIBWESTON_MAJOR@ is replaced at package()-time.
+export WESTON_MODULE_MAP="anland-backend.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/anland-backend.so;gl-renderer.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/gl-renderer.so;vulkan-renderer.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/vulkan-renderer.so;desktop-shell.so=/usr/lib/weston/desktop-shell.so;xwayland.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/xwayland.so"
+
+# Native freedreno GL on the kgsl GPU node (loader name "kgsl"). GALLIUM_DRIVER
+# is set so EGL does NOT silently fall back to zink if freedreno init fails
+# (we require freedreno end-to-end).
+export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+export GALLIUM_DRIVER=kgsl
+# Force the freedreno DRM layer to open /dev/kgsl-3d0 directly. EGL/GBM clients
+# (Xwayland glamor, GL apps) are otherwise handed the sde-kms display node
+# (renderD128), which drmGetVersion reports as "msm" with no GPU behind it ->
+# half-initialised screen -> crash. The Adreno GPU is kgsl-only on this device.
+export FD_FORCE_KGSL=1
+export MESA_VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE=1
+export MESA_VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE_DRI3=1
+
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
+
+shift 2>/dev/null || true
+exec /usr/bin/weston --backend=anland-backend.so --disp-sock="$SOCK" --xwayland "$@"
+WESTON
+
+    # ── 2. env file (sourced by services or user shell) ──
+    install -Dm644 /dev/stdin "$pkgdir/etc/weston/anland-env" << 'ENVFILE'
+MESA_LOADER_DRIVER_OVERRIDE=kgsl
+GALLIUM_DRIVER=kgsl
+FD_FORCE_KGSL=1
+MESA_VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE=1
+MESA_VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE_DRI3=1
+XWAYLAND_NO_DRI3_MODIFIERS=1
+WESTON_MODULE_MAP="\
+anland-backend.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/anland-backend.so;\
+gl-renderer.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/gl-renderer.so;\
+vulkan-renderer.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/vulkan-renderer.so;\
+xwayland.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/xwayland.so;\
+desktop-shell.so=/usr/lib/weston/desktop-shell.so"
+ENVFILE
+
+    # ── 3. anland-kde  (equivalent to build_and_install.sh start_kde.sh) ──
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/anland-kde" << 'KDE'
+#!/bin/bash
+SOCK="${1:-/run/display.sock}"
+
+RUNTIME_DIR="/run/user/$(id -u)"
+export XDG_RUNTIME_DIR="${RUNTIME_DIR}"
+if [[ ! -d ${RUNTIME_DIR} ]]; then
+    sudo mkdir -p "${RUNTIME_DIR}"
+fi
+sudo chown "$(id -un):$(id -gn)" "${RUNTIME_DIR}"
+chmod 0700 "${RUNTIME_DIR}"
+
+export WESTON_MODULE_MAP="anland-backend.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/anland-backend.so;gl-renderer.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/gl-renderer.so;vulkan-renderer.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/vulkan-renderer.so;xwayland.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/xwayland.so;kiosk-shell.so=/usr/lib/weston/kiosk-shell.so"
+unset DISPLAY
+
+# Use the native freedreno GL driver on the kgsl GPU node. The gallium driver
+# is registered under the name "kgsl" (an alias of msm in the patched mesa from
+# mesa-for-android-container dev branch) — NOT "freedreno", which is not a valid
+# loader name and would fall through to zink->llvmpipe.
+# GALLIUM_DRIVER pins it so EGL won't silently fall back to zink on failure.
+export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+export GALLIUM_DRIVER=kgsl
+export FD_FORCE_KGSL=1
+export MESA_VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE=1
+
+WESTON_PID=
+KDE_PID=
+
+cleanup() {
+    [ -n "$KDE_PID" ]    && kill "$KDE_PID"    2>/dev/null
+    [ -n "$WESTON_PID" ] && kill "$WESTON_PID" 2>/dev/null
+    sleep 0.3
+    [ -n "$KDE_PID" ]    && kill -9 "$KDE_PID"    2>/dev/null
+    [ -n "$WESTON_PID" ] && kill -9 "$WESTON_PID" 2>/dev/null
+    wait 2>/dev/null
+}
+trap cleanup EXIT
+
+rm -f "${XDG_RUNTIME_DIR}"/wayland-* 2>/dev/null
+
+/usr/bin/weston -Banland-backend.so --disp-sock="$SOCK" --shell=kiosk-shell.so --no-config &
+WESTON_PID=$!
+
+WESTON_SOCKET=""
+for i in $(seq 1 300); do
+    sleep 1
+    for wl in "${XDG_RUNTIME_DIR}"/wayland-*; do
+        [ -S "$wl" ] || continue
+        WESTON_SOCKET="$(basename "$wl")"
+        break 2
+    done
+done
+
+if [ -z "$WESTON_SOCKET" ]; then
+    echo "ERROR: weston wayland socket not found"
+    wait "$WESTON_PID"
+    exit 1
+fi
+echo "weston socket: $WESTON_SOCKET"
+
+export WAYLAND_DISPLAY="$WESTON_SOCKET"
+# Native freedreno GL on the kgsl GPU node. Registered loader name is "kgsl"
+# (alias of msm in the patched mesa), NOT "freedreno". GALLIUM_DRIVER pins it
+# so EGL won't silently fall back to zink if freedreno init fails.
+export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+export GALLIUM_DRIVER=kgsl
+export FD_FORCE_KGSL=1
+# Kept for any client that still falls back to the zink path: force the default
+# Vulkan device (plain var = surfaceless, _DRI3 = Xwayland GBM/DRI3 glamor path)
+# so it lands on turnip instead of llvmpipe.
+export MESA_VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE=1
+export MESA_VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE_DRI3=1
+export QT_QPA_PLATFORM=wayland
+export FD_MESA_DEBUG=notile
+export XWAYLAND_NO_DRI3_MODIFIERS=1
+dbus-run-session startplasma-wayland &
+KDE_PID=$!
+
+wait "$WESTON_PID"
+KDE
+    # ── 4. anland-kde-zink  (equivalent to build_and_install.sh start_kde_zink.sh) ──
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/anland-kde-zink" << 'ZINK'
+#!/bin/bash
+SOCK="${1:-/run/display.sock}"
+
+RUNTIME_DIR="/run/user/$(id -u)"
+export XDG_RUNTIME_DIR="${RUNTIME_DIR}"
+if [[ ! -d ${RUNTIME_DIR} ]]; then
+    sudo mkdir -p "${RUNTIME_DIR}"
+fi
+sudo chown "$(id -un):$(id -gn)" "${RUNTIME_DIR}"
+chmod 0700 "${RUNTIME_DIR}"
+
+export WESTON_MODULE_MAP="anland-backend.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/anland-backend.so;gl-renderer.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/gl-renderer.so;vulkan-renderer.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/vulkan-renderer.so;xwayland.so=/usr/lib/libweston-@LIBWESTON_MAJOR@/xwayland.so;kiosk-shell.so=/usr/lib/weston/kiosk-shell.so"
+unset DISPLAY
+
+# Route GL through zink-on-turnip and force the default Vulkan device so it
+# doesn't fall back to llvmpipe (software) on the kgsl backend. Needed for
+# Xwayland / X11 clients to get hardware acceleration.
+export MESA_LOADER_DRIVER_OVERRIDE=zink
+export MESA_VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE=1
+
+WESTON_PID=
+KDE_PID=
+
+cleanup() {
+    [ -n "$KDE_PID" ]    && kill "$KDE_PID"    2>/dev/null
+    [ -n "$WESTON_PID" ] && kill "$WESTON_PID" 2>/dev/null
+    sleep 0.3
+    [ -n "$KDE_PID" ]    && kill -9 "$KDE_PID"    2>/dev/null
+    [ -n "$WESTON_PID" ] && kill -9 "$WESTON_PID" 2>/dev/null
+    wait 2>/dev/null
+}
+trap cleanup EXIT
+
+if ! command -v startplasma-wayland >/dev/null 2>&1; then
+    echo "ERROR: startplasma-wayland not found."
+    echo "Install the standard Plasma Wayland session launcher:"
+    echo "  sudo pacman -S plasma-workspace"
+    exit 1
+fi
+
+rm -f "${XDG_RUNTIME_DIR}"/wayland-* 2>/dev/null
+
+/usr/bin/weston -Banland-backend.so --disp-sock="$SOCK" --shell=kiosk-shell.so --no-config &
+WESTON_PID=$!
+
+WESTON_SOCKET=""
+for i in $(seq 1 300); do
+    sleep 1
+    for wl in "${XDG_RUNTIME_DIR}"/wayland-*; do
+        [ -S "$wl" ] || continue
+        WESTON_SOCKET="$(basename "$wl")"
+        break 2
+    done
+done
+
+if [ -z "$WESTON_SOCKET" ]; then
+    echo "ERROR: weston wayland socket not found"
+    wait "$WESTON_PID"
+    exit 1
+fi
+echo "weston socket: $WESTON_SOCKET"
+
+export WAYLAND_DISPLAY="$WESTON_SOCKET"
+export MESA_LOADER_DRIVER_OVERRIDE=zink
+export GALLIUM_DRIVER=zink
+# Force the default Vulkan device so zink picks turnip instead of falling back
+# to llvmpipe. The plain var covers the surfaceless path; the _DRI3 variant
+# (added to this patched mesa) covers Xwayland's GBM/DRI3 glamor path, whose
+# render-node DRM major/minor never matches turnip on the kgsl backend.
+export MESA_VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE=1
+export MESA_VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE_DRI3=1
+export QT_QPA_PLATFORM=wayland
+
+# Standard Plasma startup. With WAYLAND_DISPLAY pointing at weston,
+# startplasma-wayland brings up kwin_wayland nested in weston (--wayland-fd),
+# spawns Xwayland, plasmashell and the full set of KDE daemons itself — no
+# manual wiring of kded/kactivitymanagerd/kwin needed.
+dbus-run-session startplasma-wayland &
+KDE_PID=$!
+
+wait "$WESTON_PID"
+ZINK
+
+    # ── Substitute libweston major in all scripts ───────────────
+    local f
+    for f in \
+        "$pkgdir/usr/bin/anland-weston" \
+        "$pkgdir/etc/weston/anland-env" \
+        "$pkgdir/usr/bin/anland-kde" \
+        "$pkgdir/usr/bin/anland-kde-zink"
+    do
+        sed -i "s|@LIBWESTON_MAJOR@|$libweston_major|g" "$f"
+    done
+
+    # ── 5. default weston.ini ──
+    install -Dm644 /dev/stdin "$pkgdir/etc/weston/anland.ini" << 'INI'
+[core]
+require-input=false
+
+[output]
+name=anland-1
+
+[shell]
+shell=desktop-shell.so
+INI
+
+    # ── 6. wayland session entry (display manager) ──
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/wayland-sessions/anland.desktop" << 'DESKTOP'
+[Desktop Entry]
+Name=Weston (anland)
+Comment=Weston compositor with anland zero-copy display backend
+Exec=/usr/bin/anland-weston
+Type=Application
+DesktopNames=weston-anland
+DESKTOP
+}
+
+# vim: set ft=PKGBUILD:

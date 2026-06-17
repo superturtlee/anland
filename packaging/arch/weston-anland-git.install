@@ -1,0 +1,32 @@
+post_install() {
+    echo ":: Weston (anland) installed."
+    echo ""
+    echo "  Start manually:"
+    echo "    anland-weston [socket-path]"
+    echo "    anland-kde    [socket-path]"
+    echo "    ANLAND_SOCK=/custom/sock anland-weston"
+    echo ""
+    echo "  Start from display manager:"
+    echo "    select 'Weston (anland)' session at login screen"
+    echo ""
+    echo "  Before starting, the anland display daemon must be running"
+    echo "  on the other end of the socket (see anland project README)."
+    echo ""
+    echo "  GPU environment overrides (see /etc/weston/anland-env):"
+    echo "    MESA_LOADER_DRIVER_OVERRIDE=kgsl"
+    echo "    FD_FORCE_KGSL=1"
+}
+
+post_upgrade() {
+    post_install
+}
+
+pre_remove() {
+    # Weston is a compositor — stop it before removing its binaries
+    # so we don't leave a headless GPU session dangling.
+    if pidof -q weston 2>/dev/null; then
+        echo ":: Weston is running — stopping before removal..."
+        pkill weston 2>/dev/null || true
+        sleep 0.3
+    fi
+}
