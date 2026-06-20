@@ -1,7 +1,7 @@
-diff -ruN a/src/backends/anland/anland_backend.cpp b/kwin-6.6.5/src/backends/anland/anland_backend.cpp
+diff -ruN a/src/backends/anland/anland_backend.cpp b/src/backends/anland/anland_backend.cpp
 --- a/src/backends/anland/anland_backend.cpp	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/anland_backend.cpp	2026-06-21 02:52:47.768629321 +0800
-@@ -0,0 +1,346 @@
++++ b/src/backends/anland/anland_backend.cpp	2026-06-21 03:08:06.016286226 +0800
+@@ -0,0 +1,390 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -90,6 +90,8 @@ diff -ruN a/src/backends/anland/anland_backend.cpp b/kwin-6.6.5/src/backends/anl
 +        ::disconnect(m_display); // C producer API, not QObject::disconnect
 +        m_display = nullptr;
 +    }
++    // m_eglDisplay (EglDisplay) tears down the EGLDisplay in its destructor; the
++    // 5.27-era manual eglTerminate(sceneEglDisplay()) is no longer needed.
 +}
 +
 +bool AnlandBackend::initialize()
@@ -111,6 +113,8 @@ diff -ruN a/src/backends/anland/anland_backend.cpp b/kwin-6.6.5/src/backends/anl
 +        return false;
 +    }
 +
++    // KWin dereferences renderBackend->drmDevice() during OpenGL compositor
++    // setup; without a real device it segfaults. Open one up front.
 +    m_drmDevice = openRenderDevice();
 +    if (!m_drmDevice) {
 +        qCWarning(KWIN_ANLAND) << "no usable DRM render device; cannot bring up OpenGL compositing";
@@ -130,6 +134,9 @@ diff -ruN a/src/backends/anland/anland_backend.cpp b/kwin-6.6.5/src/backends/anl
 +    m_reconnectTimer->setInterval(s_reconnectIntervalMs);
 +    connect(m_reconnectTimer, &QTimer::timeout, this, &AnlandBackend::onReconnectTimer);
 +
++    // connect_to_deamon() only fetched screen info; the context is still in
++    // fallback with no consumer fds or dmabufs. Enter fallback explicitly so the
++    // reconnect timer starts and discovers the consumer via try_exit_fallback().
 +    enterFallback();
 +
 +    return true;
@@ -229,6 +236,10 @@ diff -ruN a/src/backends/anland/anland_backend.cpp b/kwin-6.6.5/src/backends/anl
 +QPointF AnlandBackend::mapInputToLogical(const QPointF &devicePoint) const
 +{
 +    AnlandOutput *output = m_outputs[0];
++    // The compositor maps logical -> device with transform().map(p, pixelSize()),
++    // so the inverse maps device -> logical with the inverted transform bounded by
++    // the device-space size (modeSize, the buffer's native landscape extent).
++    // Then divide out the output scale to land in global logical coordinates.
 +    const QPointF logical = output->transform().inverted().map(devicePoint, QSizeF(output->modeSize()));
 +    return logical / output->scale();
 +}
@@ -293,6 +304,9 @@ diff -ruN a/src/backends/anland/anland_backend.cpp b/kwin-6.6.5/src/backends/anl
 +        return;
 +    }
 +
++    // The dmabuf set is already in hand (try_exit_fallback() received it when we
++    // left fallback), so buffer-ready is purely a frame-completion signal: drain
++    // the eventfd and pace the render cycle.
 +    const int fd = get_buffer_ready_fd(m_display);
 +    if (fd >= 0) {
 +        eventfd_t val;
@@ -301,6 +315,9 @@ diff -ruN a/src/backends/anland/anland_backend.cpp b/kwin-6.6.5/src/backends/anl
 +
 +    m_consumerReady = true;
 +
++    // Buffer-ready is our frame-completion signal: complete the in-flight frame
++    // (if any) and schedule the next one, keeping the render cycle paced by the
++    // consumer rather than a timer.
 +    m_outputs[0]->onConsumerReady();
 +}
 +
@@ -311,20 +328,33 @@ diff -ruN a/src/backends/anland/anland_backend.cpp b/kwin-6.6.5/src/backends/anl
 +
 +void AnlandBackend::enterFallback()
 +{
-+    if (m_inFallback) return;
-+
++    if (m_inFallback) {
++        return;
++    }
 +    qCWarning(KWIN_ANLAND) << "consumer disconnected, entering fallback";
 +
-+    m_inputDevice->touchCancel();
++    if (m_inputDevice) {
++        m_inputDevice->touchCancel();
++    }
++
++    // A frame may be in flight awaiting a buffer-ready that will never come now;
++    // fail it so the RenderLoop's frame accounting does not stall.
 +    m_outputs[0]->stopRendering();
 +
 +    teardownNotifiers();
 +
-+    m_outputs[0]->eglLayer()->releaseBuffers();
++    // Renderer is stopped: drop the imported dmabuf set now that the producer's fds
++    // are gone. The layer is null at startup (no GL backend attached yet).
++    if (AnlandEglLayer *layer = m_outputs[0]->eglLayer()) {
++        layer->releaseBuffers();
++    }
 +
 +    m_consumerReady = false;
 +    m_inFallback = true;
-+    m_reconnectTimer->start();
++
++    if (m_reconnectTimer) {
++        m_reconnectTimer->start();
++    }
 +}
 +
 +void AnlandBackend::onReconnectTimer()
@@ -334,23 +364,37 @@ diff -ruN a/src/backends/anland/anland_backend.cpp b/kwin-6.6.5/src/backends/anl
 +        return;
 +    }
 +
-+    if (try_exit_fallback(m_display) != 0) return; // still down, keep retrying
++    if (try_exit_fallback(m_display) != 0) {
++        return; // still down, keep retrying
++    }
 +
 +    qCInfo(KWIN_ANLAND) << "consumer reconnected";
 +    m_inFallback = false;
 +    m_consumerReady = false;
 +    m_reconnectTimer->stop();
++
++    // try_exit_fallback() already received a fresh dmabuf set. Import it into the
++    // layer (which arms an infinite/full-output repaint on every rotation buffer),
++    // resume the RenderLoop (uninhibit, balancing the inhibit from onConsumerLost),
++    // and mark the layer dirty. scheduleRepaint() keeps the layer's needsRepaint()
++    // true so the next composite() paints into the new dmabufs even on an idle
++    // desktop. resumeRendering() runs unconditionally to keep inhibit/uninhibit
++    // balanced regardless of whether the GL layer is attached yet.
 +    AnlandEglLayer *layer = m_outputs[0]->eglLayer();
-+    layer->importBuffers(get_buf_count(m_display));
++    if (layer) {
++        layer->importBuffers(get_buf_count(m_display));
++    }
 +    setupNotifiers();
 +    m_outputs[0]->resumeRendering();
-+    layer->scheduleRepaint(nullptr);
++    if (layer) {
++        layer->scheduleRepaint(nullptr);
++    }
 +}
 +
 +} // namespace KWin
-diff -ruN a/src/backends/anland/anland_backend.h b/kwin-6.6.5/src/backends/anland/anland_backend.h
+diff -ruN a/src/backends/anland/anland_backend.h b/src/backends/anland/anland_backend.h
 --- a/src/backends/anland/anland_backend.h	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/anland_backend.h	2026-06-21 02:00:31.652258757 +0800
++++ b/src/backends/anland/anland_backend.h	2026-06-21 02:00:31.652258757 +0800
 @@ -0,0 +1,100 @@
 +/*
 +    KWin - the KDE window manager
@@ -452,9 +496,9 @@ diff -ruN a/src/backends/anland/anland_backend.h b/kwin-6.6.5/src/backends/anlan
 +};
 +
 +} // namespace KWin
-diff -ruN a/src/backends/anland/anland_egl_backend.cpp b/kwin-6.6.5/src/backends/anland/anland_egl_backend.cpp
+diff -ruN a/src/backends/anland/anland_egl_backend.cpp b/src/backends/anland/anland_egl_backend.cpp
 --- a/src/backends/anland/anland_egl_backend.cpp	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/anland_egl_backend.cpp	2026-06-21 02:16:32.866818546 +0800
++++ b/src/backends/anland/anland_egl_backend.cpp	2026-06-21 02:16:32.866818546 +0800
 @@ -0,0 +1,315 @@
 +/*
 +    KWin - the KDE window manager
@@ -771,9 +815,9 @@ diff -ruN a/src/backends/anland/anland_egl_backend.cpp b/kwin-6.6.5/src/backends
 +}
 +
 +} // namespace KWin
-diff -ruN a/src/backends/anland/anland_egl_backend.h b/kwin-6.6.5/src/backends/anland/anland_egl_backend.h
+diff -ruN a/src/backends/anland/anland_egl_backend.h b/src/backends/anland/anland_egl_backend.h
 --- a/src/backends/anland/anland_egl_backend.h	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/anland_egl_backend.h	2026-06-21 00:50:33.955265904 +0800
++++ b/src/backends/anland/anland_egl_backend.h	2026-06-21 00:50:33.955265904 +0800
 @@ -0,0 +1,101 @@
 +/*
 +    KWin - the KDE window manager
@@ -876,9 +920,9 @@ diff -ruN a/src/backends/anland/anland_egl_backend.h b/kwin-6.6.5/src/backends/a
 +};
 +
 +} // namespace KWin
-diff -ruN a/src/backends/anland/anland_input.cpp b/kwin-6.6.5/src/backends/anland/anland_input.cpp
+diff -ruN a/src/backends/anland/anland_input.cpp b/src/backends/anland/anland_input.cpp
 --- a/src/backends/anland/anland_input.cpp	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/anland_input.cpp	2026-06-20 01:30:35.638904085 +0800
++++ b/src/backends/anland/anland_input.cpp	2026-06-20 01:30:35.638904085 +0800
 @@ -0,0 +1,163 @@
 +/*
 +    KWin - the KDE window manager
@@ -1043,9 +1087,9 @@ diff -ruN a/src/backends/anland/anland_input.cpp b/kwin-6.6.5/src/backends/anlan
 +}
 +
 +} // namespace KWin
-diff -ruN a/src/backends/anland/anland_input.h b/kwin-6.6.5/src/backends/anland/anland_input.h
+diff -ruN a/src/backends/anland/anland_input.h b/src/backends/anland/anland_input.h
 --- a/src/backends/anland/anland_input.h	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/anland_input.h	2026-06-19 22:03:24.596604308 +0800
++++ b/src/backends/anland/anland_input.h	2026-06-19 22:03:24.596604308 +0800
 @@ -0,0 +1,71 @@
 +/*
 +    KWin - the KDE window manager
@@ -1118,9 +1162,9 @@ diff -ruN a/src/backends/anland/anland_input.h b/kwin-6.6.5/src/backends/anland/
 +};
 +
 +} // namespace KWin
-diff -ruN a/src/backends/anland/anland_logging.cpp b/kwin-6.6.5/src/backends/anland/anland_logging.cpp
+diff -ruN a/src/backends/anland/anland_logging.cpp b/src/backends/anland/anland_logging.cpp
 --- a/src/backends/anland/anland_logging.cpp	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/anland_logging.cpp	2026-06-19 22:03:24.596624678 +0800
++++ b/src/backends/anland/anland_logging.cpp	2026-06-19 22:03:24.596624678 +0800
 @@ -0,0 +1,8 @@
 +/*
 +    KWin - the KDE window manager
@@ -1130,9 +1174,9 @@ diff -ruN a/src/backends/anland/anland_logging.cpp b/kwin-6.6.5/src/backends/anl
 +*/
 +#include "anland_logging.h"
 +Q_LOGGING_CATEGORY(KWIN_ANLAND, "kwin_backend_anland", QtWarningMsg)
-diff -ruN a/src/backends/anland/anland_logging.h b/kwin-6.6.5/src/backends/anland/anland_logging.h
+diff -ruN a/src/backends/anland/anland_logging.h b/src/backends/anland/anland_logging.h
 --- a/src/backends/anland/anland_logging.h	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/anland_logging.h	2026-06-19 22:03:24.596638818 +0800
++++ b/src/backends/anland/anland_logging.h	2026-06-19 22:03:24.596638818 +0800
 @@ -0,0 +1,10 @@
 +/*
 +    KWin - the KDE window manager
@@ -1144,9 +1188,9 @@ diff -ruN a/src/backends/anland/anland_logging.h b/kwin-6.6.5/src/backends/anlan
 +#include <QDebug>
 +#include <QLoggingCategory>
 +Q_DECLARE_LOGGING_CATEGORY(KWIN_ANLAND)
-diff -ruN a/src/backends/anland/anland_output.cpp b/kwin-6.6.5/src/backends/anland/anland_output.cpp
+diff -ruN a/src/backends/anland/anland_output.cpp b/src/backends/anland/anland_output.cpp
 --- a/src/backends/anland/anland_output.cpp	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/anland_output.cpp	2026-06-21 02:06:55.936968354 +0800
++++ b/src/backends/anland/anland_output.cpp	2026-06-21 02:06:55.936968354 +0800
 @@ -0,0 +1,158 @@
 +/*
 +    KWin - the KDE window manager
@@ -1306,9 +1350,9 @@ diff -ruN a/src/backends/anland/anland_output.cpp b/kwin-6.6.5/src/backends/anla
 +}
 +
 +} // namespace KWin
-diff -ruN a/src/backends/anland/anland_output.h b/kwin-6.6.5/src/backends/anland/anland_output.h
+diff -ruN a/src/backends/anland/anland_output.h b/src/backends/anland/anland_output.h
 --- a/src/backends/anland/anland_output.h	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/anland_output.h	2026-06-20 15:17:11.493988450 +0800
++++ b/src/backends/anland/anland_output.h	2026-06-20 15:17:11.493988450 +0800
 @@ -0,0 +1,86 @@
 +/*
 +    KWin - the KDE window manager
@@ -1396,9 +1440,9 @@ diff -ruN a/src/backends/anland/anland_output.h b/kwin-6.6.5/src/backends/anland
 +};
 +
 +} // namespace KWin
-diff -ruN a/src/backends/anland/CMakeLists.txt b/kwin-6.6.5/src/backends/anland/CMakeLists.txt
+diff -ruN a/src/backends/anland/CMakeLists.txt b/src/backends/anland/CMakeLists.txt
 --- a/src/backends/anland/CMakeLists.txt	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/CMakeLists.txt	2026-06-19 22:03:24.596416640 +0800
++++ b/src/backends/anland/CMakeLists.txt	2026-06-19 22:03:24.596416640 +0800
 @@ -0,0 +1,13 @@
 +target_sources(kwin PRIVATE
 +    anland_backend.cpp
@@ -1413,9 +1457,9 @@ diff -ruN a/src/backends/anland/CMakeLists.txt b/kwin-6.6.5/src/backends/anland/
 +
 +target_include_directories(kwin PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 +target_link_libraries(kwin PRIVATE Libdrm::Libdrm)
-diff -ruN a/src/backends/anland/display_producer.c b/kwin-6.6.5/src/backends/anland/display_producer.c
+diff -ruN a/src/backends/anland/display_producer.c b/src/backends/anland/display_producer.c
 --- a/src/backends/anland/display_producer.c	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/display_producer.c	2026-06-19 23:44:28.308030662 +0800
++++ b/src/backends/anland/display_producer.c	2026-06-19 23:44:28.308030662 +0800
 @@ -0,0 +1,359 @@
 +#define _GNU_SOURCE
 +#include "display_producer.h"
@@ -1776,9 +1820,9 @@ diff -ruN a/src/backends/anland/display_producer.c b/kwin-6.6.5/src/backends/anl
 +    *info = ctx->dmabuf_infos[idx];
 +    return 0;
 +}
-diff -ruN a/src/backends/anland/display_producer.h b/kwin-6.6.5/src/backends/anland/display_producer.h
+diff -ruN a/src/backends/anland/display_producer.h b/src/backends/anland/display_producer.h
 --- a/src/backends/anland/display_producer.h	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/display_producer.h	2026-06-19 23:43:35.545017289 +0800
++++ b/src/backends/anland/display_producer.h	2026-06-19 23:43:35.545017289 +0800
 @@ -0,0 +1,59 @@
 +#ifndef DISPLAY_PRODUCER_H
 +#define DISPLAY_PRODUCER_H
@@ -1839,9 +1883,9 @@ diff -ruN a/src/backends/anland/display_producer.h b/kwin-6.6.5/src/backends/anl
 +int  get_dmabuf_info_at(display_ctx *ctx, int idx, struct buf_info *info);
 +
 +#endif
-diff -ruN a/src/backends/anland/protocol.h b/kwin-6.6.5/src/backends/anland/protocol.h
+diff -ruN a/src/backends/anland/protocol.h b/src/backends/anland/protocol.h
 --- a/src/backends/anland/protocol.h	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/protocol.h	2026-06-20 15:14:14.865288483 +0800
++++ b/src/backends/anland/protocol.h	2026-06-20 15:14:14.865288483 +0800
 @@ -0,0 +1,97 @@
 +#ifndef DISPLAY_PROTOCOL_H
 +#define DISPLAY_PROTOCOL_H
@@ -1940,9 +1984,9 @@ diff -ruN a/src/backends/anland/protocol.h b/kwin-6.6.5/src/backends/anland/prot
 +} __attribute__((packed));
 +
 +#endif
-diff -ruN a/src/backends/anland/socket_utils.c b/kwin-6.6.5/src/backends/anland/socket_utils.c
+diff -ruN a/src/backends/anland/socket_utils.c b/src/backends/anland/socket_utils.c
 --- a/src/backends/anland/socket_utils.c	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/socket_utils.c	2026-06-19 22:03:24.596789476 +0800
++++ b/src/backends/anland/socket_utils.c	2026-06-19 22:03:24.596789476 +0800
 @@ -0,0 +1,121 @@
 +#include "socket_utils.h"
 +
@@ -2065,9 +2109,9 @@ diff -ruN a/src/backends/anland/socket_utils.c b/kwin-6.6.5/src/backends/anland/
 +    }
 +    return 0;
 +}
-diff -ruN a/src/backends/anland/socket_utils.h b/kwin-6.6.5/src/backends/anland/socket_utils.h
+diff -ruN a/src/backends/anland/socket_utils.h b/src/backends/anland/socket_utils.h
 --- a/src/backends/anland/socket_utils.h	1970-01-01 08:00:00.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/anland/socket_utils.h	2026-06-19 22:03:24.596813406 +0800
++++ b/src/backends/anland/socket_utils.h	2026-06-19 22:03:24.596813406 +0800
 @@ -0,0 +1,18 @@
 +#ifndef DISPLAY_SOCKET_UTILS_H
 +#define DISPLAY_SOCKET_UTILS_H
@@ -2087,17 +2131,17 @@ diff -ruN a/src/backends/anland/socket_utils.h b/kwin-6.6.5/src/backends/anland/
 +int recv_all(int fd, void *buf, size_t len);
 +
 +#endif
-diff -ruN a/src/backends/CMakeLists.txt b/kwin-6.6.5/src/backends/CMakeLists.txt
+diff -ruN a/src/backends/CMakeLists.txt b/src/backends/CMakeLists.txt
 --- a/src/backends/CMakeLists.txt	2026-05-12 18:26:46.000000000 +0800
-+++ b/kwin-6.6.5/src/backends/CMakeLists.txt	2026-06-19 22:03:24.596384600 +0800
++++ b/src/backends/CMakeLists.txt	2026-06-19 22:03:24.596384600 +0800
 @@ -1,3 +1,4 @@
 +add_subdirectory(anland)
  add_subdirectory(drm)
  add_subdirectory(fakeinput)
  add_subdirectory(libinput)
-diff -ruN a/src/main_wayland.cpp b/kwin-6.6.5/src/main_wayland.cpp
+diff -ruN a/src/main_wayland.cpp b/src/main_wayland.cpp
 --- a/src/main_wayland.cpp	2026-05-12 18:26:46.000000000 +0800
-+++ b/kwin-6.6.5/src/main_wayland.cpp	2026-06-19 22:03:24.596852465 +0800
++++ b/src/main_wayland.cpp	2026-06-19 22:03:24.596852465 +0800
 @@ -10,6 +10,7 @@
  
  #include "config-kwin.h"
