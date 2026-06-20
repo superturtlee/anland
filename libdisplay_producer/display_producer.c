@@ -12,6 +12,10 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+/* poll() timeout (ms) for the two reconnect handshake steps. Kept short so the
+ * caller's reconnect loop stays responsive when no consumer is present yet. */
+#define HANDSHAKE_TIMEOUT_MS 100
+
 struct display_ctx {
     int      ctrl_fd;
     int      data_fd;
@@ -24,7 +28,6 @@ struct display_ctx {
     uint32_t refresh;
     bool     fallback;
 
-    bool     async_pending;
     int      dmabuf_fds[MAX_BUFS];
     struct buf_info dmabuf_infos[MAX_BUFS];
     int      buf_count;
@@ -33,12 +36,13 @@ struct display_ctx {
     void  *fallback_userdata;
 };
 
-static void enter_fallback(display_ctx *ctx)
+/*
+ * Release every consumer-side resource (dmabuf fds, the four picked-up fds and the
+ * shm mapping), leaving the context holding only the daemon ctrl_fd. Does NOT touch
+ * the fallback flag or fire the fallback callback — callers decide that. Idempotent.
+ */
+static void release_consumer_resources(display_ctx *ctx)
 {
-    if (ctx->fallback)
-        return;
-    ctx->fallback = true;
-
     for (int i = 0; i < ctx->buf_count; i++) {
         if (ctx->dmabuf_fds[i] >= 0) {
             close(ctx->dmabuf_fds[i]);
@@ -46,42 +50,114 @@ static void enter_fallback(display_ctx *ctx)
         }
     }
     ctx->buf_count = 0;
-    if (ctx->data_fd >= 0)         { close(ctx->data_fd);         ctx->data_fd = -1; }
-    if (ctx->buf_ready_efd >= 0)   { close(ctx->buf_ready_efd);   ctx->buf_ready_efd = -1; }
-    if (ctx->refresh_done_efd >= 0){ close(ctx->refresh_done_efd); ctx->refresh_done_efd = -1; }
-    if (ctx->shm_ptr) { munmap((void *)ctx->shm_ptr, sizeof(uint32_t)); ctx->shm_ptr = NULL; }
-    if (ctx->shm_fd >= 0)         { close(ctx->shm_fd);           ctx->shm_fd = -1; }
+
+    if (ctx->data_fd >= 0)          { close(ctx->data_fd);          ctx->data_fd = -1; }
+    if (ctx->buf_ready_efd >= 0)    { close(ctx->buf_ready_efd);    ctx->buf_ready_efd = -1; }
+    if (ctx->refresh_done_efd >= 0) { close(ctx->refresh_done_efd); ctx->refresh_done_efd = -1; }
+    if (ctx->shm_ptr)               { munmap((void *)ctx->shm_ptr, sizeof(uint32_t)); ctx->shm_ptr = NULL; }
+    if (ctx->shm_fd >= 0)           { close(ctx->shm_fd);           ctx->shm_fd = -1; }
+}
+
+static void enter_fallback(display_ctx *ctx)
+{
+    if (ctx->fallback)
+        return;
+    ctx->fallback = true;
+
+    release_consumer_resources(ctx);
 
     if (ctx->fallback_cb)
         ctx->fallback_cb(ctx->fallback_userdata);
 }
 
+/*
+ * Ask the daemon for the consumer-side fds and map the shm index. Polls ctrl_fd
+ * with a short timeout so it returns promptly when no consumer is up yet. On
+ * success the four fds and shm_ptr are installed on ctx; the caller releases them
+ * via release_consumer_resources() on any later failure. Returns 0 / -1.
+ */
 static int pickup_fds(display_ctx *ctx)
 {
     struct ctrl_msg hdr = { .type = CTRL_MSG_PICKUP_FDS, .size = 0 };
     if (send_all(ctx->ctrl_fd, &hdr, sizeof(hdr)) < 0)
         return -1;
 
+    struct pollfd pfd = { .fd = ctx->ctrl_fd, .events = POLLIN };
+    if (poll(&pfd, 1, HANDSHAKE_TIMEOUT_MS) <= 0)
+        return -1;
+
     int fds[4];
     int fd_count = 0;
     struct ctrl_msg resp;
     int n = recv_fds(ctx->ctrl_fd, &resp, sizeof(resp), fds, 4, &fd_count);
-    if (n <= 0 || resp.type != CTRL_MSG_FDS_READY || fd_count < 4)
+    if (n <= 0 || resp.type != CTRL_MSG_FDS_READY || fd_count < 4) {
+        for (int i = 0; i < fd_count; i++)
+            close(fds[i]);
         return -1;
+    }
 
-    ctx->buf_ready_efd = fds[0];
+    ctx->buf_ready_efd    = fds[0];
     ctx->refresh_done_efd = fds[1];
-    ctx->data_fd = fds[2];
-    ctx->shm_fd = fds[3];
+    ctx->data_fd          = fds[2];
+    ctx->shm_fd           = fds[3];
 
-    ctx->shm_ptr = mmap(NULL, sizeof(uint32_t), PROT_READ,
-                        MAP_SHARED, ctx->shm_fd, 0);
+    ctx->shm_ptr = mmap(NULL, sizeof(uint32_t), PROT_READ, MAP_SHARED, ctx->shm_fd, 0);
     if (ctx->shm_ptr == MAP_FAILED) {
         ctx->shm_ptr = NULL;
         return -1;
     }
+    return 0;
+}
 
-    ctx->fallback = false;
+/*
+ * Receive the dmabuf set the consumer pushes onto the data channel right after the
+ * fd handshake. Polls data_fd with a short timeout. On failure the caller releases
+ * the partially-acquired consumer resources. Returns 0 / -1.
+ */
+static int receive_dmabufs(display_ctx *ctx)
+{
+    if (ctx->buf_count > 0)
+        return 0;
+
+    struct pollfd pfd = { .fd = ctx->data_fd, .events = POLLIN | POLLHUP | POLLERR };
+    if (poll(&pfd, 1, HANDSHAKE_TIMEOUT_MS) <= 0)
+        return -1;
+    if (pfd.revents & (POLLHUP | POLLERR))
+        return -1;
+
+    struct data_msg dhdr;
+    int fds[MAX_BUFS];
+    int fd_count = 0;
+
+    int n = recv_fds(ctx->data_fd, &dhdr, sizeof(dhdr), fds, MAX_BUFS, &fd_count);
+    if (n < (int)sizeof(struct data_msg) || fd_count < 1)
+        return -1;
+
+    if (dhdr.type != DATA_MSG_BUFS_READY) {
+        for (int i = 0; i < fd_count; i++)
+            close(fds[i]);
+        return -1;
+    }
+
+    int count = dhdr.size / sizeof(struct buf_info);
+    if (count != fd_count || count > MAX_BUFS) {
+        for (int i = 0; i < fd_count; i++)
+            close(fds[i]);
+        return -1;
+    }
+
+    struct buf_info infos[MAX_BUFS];
+    if (recv_all(ctx->data_fd, infos, dhdr.size) < 0) {
+        for (int i = 0; i < fd_count; i++)
+            close(fds[i]);
+        return -1;
+    }
+
+    for (int i = 0; i < count; i++) {
+        ctx->dmabuf_fds[i] = fds[i];
+        ctx->dmabuf_infos[i] = infos[i];
+    }
+    ctx->buf_count = count;
     return 0;
 }
 
@@ -97,7 +173,7 @@ int connect_to_deamon(display_ctx **out, const char *socket_path)
     ctx->refresh_done_efd = -1;
     ctx->shm_fd = -1;
     ctx->shm_ptr = NULL;
-    ctx->fallback = true;
+    ctx->fallback = true; // stay in fallback until try_exit_fallback() succeeds
     for (int i = 0; i < MAX_BUFS; i++)
         ctx->dmabuf_fds[i] = -1;
 
@@ -125,19 +201,15 @@ int connect_to_deamon(display_ctx **out, const char *socket_path)
     ctx->pixel_format = si.format;
     ctx->refresh = si.refresh;
 
-    if (pickup_fds(ctx) < 0)
-        goto fail;
-
+    // Daemon handshake only: screen info is in hand, but the consumer fds and
+    // dmabufs are deliberately left for try_exit_fallback() so the backend brings
+    // the consumer up through the single reconnect path. Stay in fallback.
     *out = ctx;
     return 0;
 
 fail:
-    if (ctx->shm_ptr) munmap((void *)ctx->shm_ptr, sizeof(uint32_t));
-    if (ctx->shm_fd >= 0)         close(ctx->shm_fd);
-    if (ctx->ctrl_fd >= 0)         close(ctx->ctrl_fd);
-    if (ctx->data_fd >= 0)         close(ctx->data_fd);
-    if (ctx->buf_ready_efd >= 0)   close(ctx->buf_ready_efd);
-    if (ctx->refresh_done_efd >= 0) close(ctx->refresh_done_efd);
+    if (ctx->ctrl_fd >= 0)
+        close(ctx->ctrl_fd);
     free(ctx);
     return -1;
 }
@@ -146,16 +218,9 @@ void disconnect(display_ctx *ctx)
 {
     if (!ctx)
         return;
-    for (int i = 0; i < ctx->buf_count; i++) {
-        if (ctx->dmabuf_fds[i] >= 0)
-            close(ctx->dmabuf_fds[i]);
-    }
-    if (ctx->shm_ptr) munmap((void *)ctx->shm_ptr, sizeof(uint32_t));
-    if (ctx->shm_fd >= 0)         close(ctx->shm_fd);
-    if (ctx->ctrl_fd >= 0)         close(ctx->ctrl_fd);
-    if (ctx->data_fd >= 0)         close(ctx->data_fd);
-    if (ctx->buf_ready_efd >= 0)   close(ctx->buf_ready_efd);
-    if (ctx->refresh_done_efd >= 0) close(ctx->refresh_done_efd);
+    release_consumer_resources(ctx);
+    if (ctx->ctrl_fd >= 0)
+        close(ctx->ctrl_fd);
     free(ctx);
 }
 
@@ -165,106 +230,6 @@ int get_screen_info(display_ctx *ctx, uint32_t *width, uint32_t *height, uint32_
     *height = ctx->screen_h;
     *format = ctx->pixel_format;
     *refresh = ctx->refresh;
-    return 0;
-}
-
-int wait_buffer_async(display_ctx *ctx)
-{
-    ctx->async_pending = true;
-    return 0;
-}
-
-static int receive_dmabufs(display_ctx *ctx)
-{
-    if (ctx->buf_count > 0)
-        return 0;
-
-    struct data_msg dhdr;
-    int fds[MAX_BUFS];
-    int fd_count = 0;
-
-    int n = recv_fds(ctx->data_fd, &dhdr, sizeof(dhdr), fds, MAX_BUFS, &fd_count);
-    if (n < (int)sizeof(struct data_msg) || fd_count < 1) {
-        enter_fallback(ctx);
-        return -1;
-    }
-
-    if (dhdr.type != DATA_MSG_BUFS_READY) {
-        for (int i = 0; i < fd_count; i++)
-            close(fds[i]);
-        return -1;
-    }
-
-    int count = dhdr.size / sizeof(struct buf_info);
-    if (count != fd_count || count > MAX_BUFS) {
-        for (int i = 0; i < fd_count; i++)
-            close(fds[i]);
-        return -1;
-    }
-
-    struct buf_info infos[MAX_BUFS];
-    if (recv_all(ctx->data_fd, infos, dhdr.size) < 0) {
-        for (int i = 0; i < fd_count; i++)
-            close(fds[i]);
-        enter_fallback(ctx);
-        return -1;
-    }
-
-    for (int i = 0; i < count; i++) {
-        ctx->dmabuf_fds[i] = fds[i];
-        ctx->dmabuf_infos[i] = infos[i];
-    }
-    ctx->buf_count = count;
-    return 0;
-}
-
-int wait_buffer_async_result(display_ctx *ctx, void **buffer)
-{
-    *buffer = NULL;
-
-    if (ctx->fallback) {
-        ctx->async_pending = false;
-        if (pickup_fds(ctx) < 0)
-            return -1;
-    }
-
-    if (!ctx->async_pending)
-        return -1;
-
-    struct pollfd pfd[2] = {
-        { .fd = ctx->buf_ready_efd, .events = POLLIN },
-        { .fd = ctx->data_fd,       .events = POLLIN | POLLHUP | POLLERR },
-    };
-
-    while (1) {
-        int ret = poll(pfd, 2, 5000);
-        if (ret < 0) {
-            if (errno == EINTR) continue;
-            enter_fallback(ctx);
-            ctx->async_pending = false;
-            return -1;
-        }
-        if (ret == 0) continue;
-
-        if (pfd[1].revents & (POLLHUP | POLLERR)) {
-            enter_fallback(ctx);
-            ctx->async_pending = false;
-            return -1;
-        }
-        if (pfd[0].revents & POLLIN)
-            break;
-    }
-
-    eventfd_t val;
-    eventfd_read(ctx->buf_ready_efd, &val);
-
-    if (receive_dmabufs(ctx) < 0) {
-        ctx->async_pending = false;
-        return -1;
-    }
-
-    ctx->async_pending = false;
-    *buffer = NULL;
     return 0;
 }
 
@@ -322,40 +287,26 @@ bool is_fallback(display_ctx *ctx)
     return ctx->fallback;
 }
 
-int try_reconnect(display_ctx *ctx)
+int try_exit_fallback(display_ctx *ctx)
 {
     if (!ctx->fallback)
         return 0;
 
-    struct ctrl_msg hdr = { .type = CTRL_MSG_PICKUP_FDS, .size = 0 };
-    if (send_all(ctx->ctrl_fd, &hdr, sizeof(hdr)) < 0)
+    // Step 1: ask the daemon to hand over the consumer-side fds.
+    if (pickup_fds(ctx) < 0) {
+        release_consumer_resources(ctx);
         return -1;
+    }
 
-    struct pollfd pfd = { .fd = ctx->ctrl_fd, .events = POLLIN };
-    if (poll(&pfd, 1, 100) <= 0)
-        return -1;
-
-    int fds[4];
-    int fd_count = 0;
-    struct ctrl_msg resp;
-    int n = recv_fds(ctx->ctrl_fd, &resp, sizeof(resp), fds, 4, &fd_count);
-    if (n <= 0 || resp.type != CTRL_MSG_FDS_READY || fd_count < 4)
-        return -1;
-
-    ctx->buf_ready_efd = fds[0];
-    ctx->refresh_done_efd = fds[1];
-    ctx->data_fd = fds[2];
-    ctx->shm_fd = fds[3];
-
-    ctx->shm_ptr = mmap(NULL, sizeof(uint32_t), PROT_READ,
-                        MAP_SHARED, ctx->shm_fd, 0);
-    if (ctx->shm_ptr == MAP_FAILED) {
-        ctx->shm_ptr = NULL;
+    // Step 2: immediately pull the dmabuf set the consumer pushes right after the
+    // fd handshake. Only leave fallback once both fds and dmabufs are in hand, so
+    // the backend can import straight away.
+    if (receive_dmabufs(ctx) < 0) {
+        release_consumer_resources(ctx);
         return -1;
     }
 
     ctx->fallback = false;
-    ctx->buf_count = 0;
     return 0;
 }
 

@@ -28,6 +28,10 @@
 #define DEFAULT_SOCKET_PATH "/tmp/display_daemon.sock"
 #define DEFAULT_REFRESH 120000
 
+/* Cadence of the reconnect loop that polls try_exit_fallback() while no
+ * consumer is present. */
+#define RECONNECT_INTERVAL_MS 200
+
 static const uint32_t anland_formats[] = {
 	DRM_FORMAT_XRGB8888,
 	DRM_FORMAT_ARGB8888,
@@ -53,8 +57,6 @@ struct anland_backend {
 
 	struct wl_event_source *buf_ready_source;
 	bool consumer_ready;
-	bool dmabuf_received;
-	bool in_fallback;
 
 	const struct pixel_format_info **formats;
 	unsigned int formats_count;
@@ -275,6 +277,9 @@ static int
 anland_buf_ready_handler(int fd, uint32_t mask, void *data);
 
 static void
+anland_import_dmabufs(struct anland_backend *b);
+
+static void
 anland_fallback_cb(void *data)
 {
 	struct anland_backend *b = data;
@@ -300,12 +305,12 @@ anland_fallback_cb(void *data)
 		b->input_fd_source = NULL;
 	}
 	b->consumer_ready = false;
-	b->dmabuf_received = false;
-	b->in_fallback = true;
 
-	/* Arm reconnect timer; normal input is dead until reconnect succeeds. */
+	/* The producer dropped us back to fallback already; resume the reconnect
+	 * loop. Normal input is dead until try_exit_fallback() succeeds. */
 	if (b->reconnect_timer)
-		wl_event_source_timer_update(b->reconnect_timer, 200);
+		wl_event_source_timer_update(b->reconnect_timer,
+					     RECONNECT_INTERVAL_MS);
 }
 
 static void
@@ -324,17 +329,16 @@ anland_drop_renderbuffers(struct anland_backend *b)
 	}
 }
 
+/* try_exit_fallback() just succeeded: the context now owns the consumer fds and
+ * the dmabuf set. Wire up the fd sources, import the dmabufs, and stop the
+ * reconnect poll. */
 static void
-anland_try_reconnect(struct anland_backend *b)
+anland_consumer_connected(struct anland_backend *b)
 {
-	if (try_reconnect(b->display) < 0)
-		return;
-
-	weston_log("anland: consumer reconnected\n");
-	b->in_fallback = false;
-
 	struct wl_event_loop *loop =
 		wl_display_get_event_loop(b->compositor->wl_display);
+
+	weston_log("anland: consumer connected\n");
 
 	int buf_ready_fd = get_buffer_ready_fd(b->display);
 	if (buf_ready_fd >= 0) {
@@ -350,6 +354,10 @@ anland_try_reconnect(struct anland_backend *b)
 							   anland_input_fd_handler, b);
 	}
 
+	/* The dmabufs arrived with the handshake (try_exit_fallback received
+	 * them), so they are ready to import right away. */
+	anland_import_dmabufs(b);
+
 	/* Stop the reconnect timer — we're back in business. */
 	if (b->reconnect_timer)
 		wl_event_source_timer_update(b->reconnect_timer, 0);
@@ -361,7 +369,7 @@ anland_input_fd_handler(int fd, uint32_t mask, void *data)
 	struct anland_backend *b = data;
 	struct InputEvent ev;
 
-	if (b->in_fallback)
+	if (is_fallback(b->display))
 		return 0;
 
 	while (poll_input_event(b->display, &ev, 0) > 0)
@@ -375,14 +383,18 @@ anland_reconnect_timer_handler(void *data)
 {
 	struct anland_backend *b = data;
 
-	if (!b->in_fallback)
+	if (!is_fallback(b->display))
 		return 0;
 
 	anland_drop_renderbuffers(b);
-	anland_try_reconnect(b);
 
-	if (b->in_fallback && b->reconnect_timer)
-		wl_event_source_timer_update(b->reconnect_timer, 200);
+	if (try_exit_fallback(b->display) == 0)
+		anland_consumer_connected(b);
+
+	/* Still no consumer — keep polling. */
+	if (is_fallback(b->display) && b->reconnect_timer)
+		wl_event_source_timer_update(b->reconnect_timer,
+					     RECONNECT_INTERVAL_MS);
 
 	return 0;
 }
@@ -478,31 +490,43 @@ anland_output_import_dmabufs(struct anland_output *output)
 	return 0;
 }
 
+/* Import the dmabuf set (received by try_exit_fallback) into the output's
+ * renderbuffers. Safe to call repeatedly: a no-op once imported (buf_count set),
+ * while still in fallback, or before the output exists. */
+static void
+anland_import_dmabufs(struct anland_backend *b)
+{
+	struct weston_output *output;
+
+	if (is_fallback(b->display) || get_buf_count(b->display) <= 0)
+		return;
+
+	wl_list_for_each(output, &b->compositor->output_list, link) {
+		struct anland_output *vout = to_anland_output(output);
+		if (!vout)
+			continue;
+		if (vout->buf_count == 0 &&
+		    anland_output_import_dmabufs(vout) < 0)
+			weston_log("anland: dmabuf import failed\n");
+		break;
+	}
+}
+
 static int
 anland_buf_ready_handler(int fd, uint32_t mask, void *data)
 {
 	struct anland_backend *b = data;
+	eventfd_t val;
 
-	if (!b->dmabuf_received) {
-		wait_buffer_async(b->display);
-		void *buf;
-		if (wait_buffer_async_result(b->display, &buf) != 0)
-			return 0;
-		b->dmabuf_received = true;
+	eventfd_read(fd, &val);
 
-		struct weston_output *output;
-		wl_list_for_each(output, &b->compositor->output_list, link) {
-			struct anland_output *vout = to_anland_output(output);
-			if (vout) {
-				if (anland_output_import_dmabufs(vout) < 0)
-					weston_log("anland: dmabuf import failed\n");
-				break;
-			}
-		}
-	} else {
-		eventfd_t val;
-		eventfd_read(fd, &val);
-	}
+	if (is_fallback(b->display))
+		return 0;
+
+	/* The output may not have existed yet when we left fallback, so the
+	 * import in anland_consumer_connected() could have been deferred. Make
+	 * sure the dmabufs are imported before the first frame. */
+	anland_import_dmabufs(b);
 
 	b->consumer_ready = true;
 
@@ -960,21 +984,17 @@ renderer_ok:
 
 	struct wl_event_loop *loop =
 		wl_display_get_event_loop(compositor->wl_display);
-	b->reconnect_timer = wl_event_loop_add_timer(loop, anland_reconnect_timer_handler, b);
-
-	int data_fd = get_data_fd(b->display);
-	if (data_fd >= 0) {
-		b->input_fd_source = wl_event_loop_add_fd(loop, data_fd,
-							   WL_EVENT_READABLE,
-							   anland_input_fd_handler, b);
+	b->reconnect_timer = wl_event_loop_add_timer(loop,
+						     anland_reconnect_timer_handler, b);
+	if (!b->reconnect_timer) {
+		weston_log("anland: failed to add reconnect timer\n");
+		goto err_display;
 	}
 
-	int buf_ready_fd = get_buffer_ready_fd(b->display);
-	if (buf_ready_fd >= 0) {
-		b->buf_ready_source = wl_event_loop_add_fd(loop, buf_ready_fd,
-							    WL_EVENT_READABLE,
-							    anland_buf_ready_handler, b);
-	}
+	/* connect_to_deamon() did only the daemon handshake, so we start in
+	 * fallback with no consumer fds or dmabufs. Arm the reconnect loop to
+	 * pick them up via try_exit_fallback() once a consumer appears. */
+	wl_event_source_timer_update(b->reconnect_timer, RECONNECT_INTERVAL_MS);
 
 	ret = weston_plugin_api_register(compositor,
 					 WESTON_WINDOWED_OUTPUT_API_NAME_ANLAND,

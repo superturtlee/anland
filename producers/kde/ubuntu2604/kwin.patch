@@ -1,3 +1,45 @@
+From bcdef3d1c4884178ebcf6f18798c7edfad9dbf9f Mon Sep 17 00:00:00 2001
+From: Yibo Wang <2024312277@stu.hit.edu.cn>
+Date: Fri, 19 Jun 2026 18:57:33 +0800
+Subject: [PATCH] 2
+
+---
+ src/backends/CMakeLists.txt                |   1 +
+ src/backends/anland/CMakeLists.txt         |  13 +
+ src/backends/anland/anland_backend.cpp     | 375 +++++++++++++++++++
+ src/backends/anland/anland_backend.h       | 112 ++++++
+ src/backends/anland/anland_egl_backend.cpp | 310 ++++++++++++++++
+ src/backends/anland/anland_egl_backend.h   | 102 ++++++
+ src/backends/anland/anland_input.cpp       | 155 ++++++++
+ src/backends/anland/anland_input.h         |  71 ++++
+ src/backends/anland/anland_logging.cpp     |   8 +
+ src/backends/anland/anland_logging.h       |  10 +
+ src/backends/anland/anland_output.cpp      | 147 ++++++++
+ src/backends/anland/anland_output.h        |  73 ++++
+ src/backends/anland/display_producer.c     | 408 +++++++++++++++++++++
+ src/backends/anland/display_producer.h     |  29 ++
+ src/backends/anland/protocol.h             |  88 +++++
+ src/backends/anland/socket_utils.c         | 121 ++++++
+ src/backends/anland/socket_utils.h         |  18 +
+ src/main_wayland.cpp                       |  16 +-
+ 18 files changed, 2056 insertions(+), 1 deletion(-)
+ create mode 100644 src/backends/anland/CMakeLists.txt
+ create mode 100644 src/backends/anland/anland_backend.cpp
+ create mode 100644 src/backends/anland/anland_backend.h
+ create mode 100644 src/backends/anland/anland_egl_backend.cpp
+ create mode 100644 src/backends/anland/anland_egl_backend.h
+ create mode 100644 src/backends/anland/anland_input.cpp
+ create mode 100644 src/backends/anland/anland_input.h
+ create mode 100644 src/backends/anland/anland_logging.cpp
+ create mode 100644 src/backends/anland/anland_logging.h
+ create mode 100644 src/backends/anland/anland_output.cpp
+ create mode 100644 src/backends/anland/anland_output.h
+ create mode 100644 src/backends/anland/display_producer.c
+ create mode 100644 src/backends/anland/display_producer.h
+ create mode 100644 src/backends/anland/protocol.h
+ create mode 100644 src/backends/anland/socket_utils.c
+ create mode 100644 src/backends/anland/socket_utils.h
+
 diff --git a/src/backends/CMakeLists.txt b/src/backends/CMakeLists.txt
 index e94a1c6..82d377c 100644
 --- a/src/backends/CMakeLists.txt
@@ -1222,7 +1264,7 @@ new file mode 100644
 index 0000000..3a15d56
 --- /dev/null
 +++ b/src/backends/anland/anland_output.cpp
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,143 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -1330,10 +1372,6 @@ index 0000000..3a15d56
 +        m_awaitingPresent = false;
 +        completeFrame();
 +    }
-+    // The consumer is back (buffers are available again): resume compositing if
-+    // it was paused during fallback, and render the next frame in lockstep with
-+    // the consumer — exactly as the 5.27 backend's buffer-ready did.
-+    resumeRendering();
 +}
 +
 +void AnlandOutput::resumeRendering()
@@ -2205,3 +2243,6 @@ index 3245c18..7e8f5bc 100644
      }
  
      KWin::WaylandServer *server = KWin::WaylandServer::create();
+-- 
+2.53.0
+
