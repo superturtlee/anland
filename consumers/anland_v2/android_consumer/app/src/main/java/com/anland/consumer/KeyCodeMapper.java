@@ -58,7 +58,7 @@ public class KeyCodeMapper {
         MAP.put(KeyEvent.KEYCODE_COMMA, 51);
         MAP.put(KeyEvent.KEYCODE_PERIOD, 52);
         MAP.put(KeyEvent.KEYCODE_SLASH, 53);
-        MAP.put(KeyEvent.KEYCODE_GRAVE, 41); // `
+        MAP.put(KeyEvent.KEYCODE_GRAVE, 41);
 
         // 功能键
         MAP.put(KeyEvent.KEYCODE_SPACE, 57);
@@ -66,7 +66,7 @@ public class KeyCodeMapper {
         MAP.put(KeyEvent.KEYCODE_DEL, 14);          // Backspace
         MAP.put(KeyEvent.KEYCODE_FORWARD_DEL, 111); // Delete
         MAP.put(KeyEvent.KEYCODE_TAB, 15);
-        MAP.put(KeyEvent.KEYCODE_ESCAPE, 1);        // ESC
+        MAP.put(KeyEvent.KEYCODE_ESCAPE, 1);
         MAP.put(KeyEvent.KEYCODE_SHIFT_LEFT, 42);
         MAP.put(KeyEvent.KEYCODE_SHIFT_RIGHT, 54);
         MAP.put(KeyEvent.KEYCODE_CTRL_LEFT, 29);
@@ -81,7 +81,7 @@ public class KeyCodeMapper {
         MAP.put(KeyEvent.KEYCODE_DPAD_LEFT, 105);
         MAP.put(KeyEvent.KEYCODE_DPAD_RIGHT, 106);
 
-        // F1-F12
+        // F1-F12（修正 F11/F12）
         MAP.put(KeyEvent.KEYCODE_F1, 59);
         MAP.put(KeyEvent.KEYCODE_F2, 60);
         MAP.put(KeyEvent.KEYCODE_F3, 61);
@@ -92,10 +92,10 @@ public class KeyCodeMapper {
         MAP.put(KeyEvent.KEYCODE_F8, 66);
         MAP.put(KeyEvent.KEYCODE_F9, 67);
         MAP.put(KeyEvent.KEYCODE_F10, 68);
-        MAP.put(KeyEvent.KEYCODE_F11, 69);
-        MAP.put(KeyEvent.KEYCODE_F12, 70);
+        MAP.put(KeyEvent.KEYCODE_F11, 87);  // 修正
+        MAP.put(KeyEvent.KEYCODE_F12, 88);  // 修正
 
-        // ====== 新增 Home 和 End ======
+        // Home / End
         MAP.put(KeyEvent.KEYCODE_MOVE_HOME, 102);
         MAP.put(KeyEvent.KEYCODE_MOVE_END, 107);
     }
