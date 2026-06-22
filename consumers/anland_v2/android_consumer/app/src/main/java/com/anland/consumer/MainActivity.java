@@ -1,10 +1,13 @@
 package com.anland.consumer;
 
 import android.app.Activity;
+import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Point;
 import android.hardware.display.DisplayManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.Display;
 import android.view.InputDevice;
@@ -27,15 +30,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
     private static final String TAG = "Anland";
 
+    // ========== 持久化存储 ==========
+    private static final String PREFS_NAME = "anland_prefs";
+    private static final String KEY_SENSITIVITY = "sensitivity";
+    private SharedPreferences prefs;
+
     private SurfaceView surfaceView;
     private boolean surfaceReady = false;
     private VirtualKeyboardView keyboardView;
     private FrameLayout rootLayout;
 
     // ========== 功能开关 ==========
-    private boolean isTouchpadMode = true;      // true: 触摸板(相对移动)  false: 绝对定位
-    private boolean isPortrait = true;          // 当前是否竖屏
-    private float sensitivity = 1.0f;           // 灵敏度系数（仅触摸板模式），范围 0.5 ~ 5.0，步长 0.5
+    private boolean isTouchpadMode = true;
+    private boolean isPortrait = true;
+    private float sensitivity = 1.0f;
 
     // 鼠标绝对位置（像素）
     private float mouseX = 0;
@@ -43,14 +51,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private int screenWidth = 1920;
     private int screenHeight = 1080;
 
-    // ---------- 音量键持续调节状态追踪 ----------
-    private long volumeUpDownTime = 0;
+    // ---------- Surface 初始化防抖 ----------
+    private final Handler surfaceInitHandler = new Handler(Looper.getMainLooper());
+    private Runnable surfaceInitRunnable = null;
+    private static final long SURFACE_INIT_DELAY = 120; // 毫秒，足够 Surface 稳定
+
+    // ---------- 音量键持续调节状态 ----------
     private long volumeUpLastAdjustTime = 0;
     private boolean volumeUpHasAdjusted = false;
-    private long volumeDownDownTime = 0;
     private long volumeDownLastAdjustTime = 0;
     private boolean volumeDownHasAdjusted = false;
-    private static final long LONG_PRESS_THRESHOLD = 500; // 毫秒
+    private static final long LONG_PRESS_THRESHOLD = 500;
 
     // ---------- 触摸板手势状态机 ----------
     private static final int STATE_IDLE = 0;
@@ -79,7 +90,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private boolean isLongPressPossible = false;
     private boolean isMultiFinger = false;
 
-    // ---------- 加速度参数（动态曲线） ----------
+    // ---------- 加速度参数 ----------
     private static final float BASE_SCALE = 2.0f;
     private static final float SCALE_STEP = 0.12f;
     private static final float MAX_SCALE = 6.0f;
@@ -123,6 +134,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        sensitivity = prefs.getFloat(KEY_SENSITIVITY, 1.0f);
+        sensitivity = Math.max(0.5f, Math.min(5.0f, sensitivity));
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
@@ -194,15 +209,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         if (dm != null)
             dm.registerDisplayListener(displayListener, null);
 
-        if (surfaceReady && surfaceView != null && surfaceView.getHolder().getSurface() != null
-                && surfaceView.getHolder().getSurface().isValid()) {
-            try {
-                nativeStop();
-                nativeStart(surfaceView.getHolder().getSurface());
-                pushRefreshRate();
-            } catch (Exception e) {
-                Log.e(TAG, "nativeStart failed in onResume", e);
-            }
+        // 立即初始化，无需延迟
+        if (surfaceReady) {
+            nativeStop();
+            nativeStart(surfaceView.getHolder().getSurface());
+            pushRefreshRate();
         }
     }
 
@@ -212,14 +223,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         DisplayManager dm = getSystemService(DisplayManager.class);
         if (dm != null)
             dm.unregisterDisplayListener(displayListener);
-        try {
-            nativeStop();
-        } catch (Exception e) {
-            Log.e(TAG, "nativeStop failed in onPause", e);
+
+        // 取消待执行的 surface 初始化
+        if (surfaceInitRunnable != null) {
+            surfaceInitHandler.removeCallbacks(surfaceInitRunnable);
+            surfaceInitRunnable = null;
         }
+        nativeStop();
     }
 
-    // ========== 横竖屏切换处理 ==========
+    // ========== 横竖屏切换：仅更新尺寸，不重建 Surface（交给 surfaceChanged 防抖） ==========
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
@@ -228,6 +241,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         mouseX = clamp(mouseX, 0, screenWidth);
         mouseY = clamp(mouseY, 0, screenHeight);
         pushRefreshRate();
+
         if (keyboardView != null && keyboardView.getVisibility() == View.VISIBLE) {
             keyboardView.post(() -> {
                 try {
@@ -238,11 +252,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             });
         }
         Log.d(TAG, "onConfigurationChanged: portrait=" + isPortrait + ", screen " + screenWidth + "x" + screenHeight);
+        // 注意：不在此处重建 Surface，由 surfaceChanged 的防抖逻辑处理
     }
 
     // ---------- SurfaceHolder.Callback ----------
     @Override
-    public void surfaceCreated(SurfaceHolder holder) {}
+    public void surfaceCreated(SurfaceHolder holder) {
+        // 无需操作
+    }
 
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
@@ -250,19 +267,38 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         surfaceReady = true;
         updateScreenSize();
 
-        Surface surface = holder.getSurface();
-        if (surface != null && surface.isValid()) {
-            try {
+        // 取消之前的延迟任务（避免快速旋转时多次执行）
+        if (surfaceInitRunnable != null) {
+            surfaceInitHandler.removeCallbacks(surfaceInitRunnable);
+            surfaceInitRunnable = null;
+        }
+
+        // 延迟执行 surface 初始化，给系统足够时间完成旋转布局
+        surfaceInitRunnable = () -> {
+            surfaceInitRunnable = null;
+            // 再次确认 surface 有效
+            Surface surface = holder.getSurface();
+            if (surface != null && surface.isValid()) {
+                Log.d(TAG, "Surface init: calling nativeStart");
                 nativeStop();
                 nativeStart(surface);
                 pushRefreshRate();
-            } catch (Exception e) {
-                Log.e(TAG, "nativeStart failed in surfaceChanged", e);
+                Log.d(TAG, "Surface init: nativeStart done");
+            } else {
+                Log.w(TAG, "Surface init: surface is null or invalid, retry in 100ms");
+                // 如果无效，再延迟一次
+                surfaceInitHandler.postDelayed(() -> {
+                    if (surfaceReady) {
+                        nativeStop();
+                        nativeStart(holder.getSurface());
+                        pushRefreshRate();
+                    }
+                }, 100);
             }
-        } else {
-            Log.w(TAG, "Surface is invalid, skipping nativeStart");
-        }
+        };
+        surfaceInitHandler.postDelayed(surfaceInitRunnable, SURFACE_INIT_DELAY);
 
+        // 键盘位置立即更新
         if (keyboardView != null && keyboardView.getVisibility() == View.VISIBLE) {
             keyboardView.post(() -> {
                 try {
@@ -277,11 +313,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
         surfaceReady = false;
-        try {
-            nativeStop();
-        } catch (Exception e) {
-            Log.e(TAG, "nativeStop failed in surfaceDestroyed", e);
+        // 取消待执行的任务
+        if (surfaceInitRunnable != null) {
+            surfaceInitHandler.removeCallbacks(surfaceInitRunnable);
+            surfaceInitRunnable = null;
         }
+        nativeStop();
     }
 
     // ---------- 辅助方法 ----------
@@ -324,22 +361,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     // ================================================================
-    // 音量键持续调节（每 500ms 调节一次，步长 0.5，松手后显示 Toast）
+    // 音量键处理（每 500ms 步进 0.5，松手后显示，持久化）
     // ================================================================
+    private void saveSensitivity() {
+        prefs.edit().putFloat(KEY_SENSITIVITY, sensitivity).apply();
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
             if (event.getRepeatCount() == 0) {
-                volumeUpDownTime = event.getEventTime();
                 volumeUpLastAdjustTime = event.getEventTime();
                 volumeUpHasAdjusted = false;
             } else {
                 long now = event.getEventTime();
                 if (now - volumeUpLastAdjustTime >= LONG_PRESS_THRESHOLD) {
                     volumeUpHasAdjusted = true;
-                    // 步长改为 0.5，范围 0.5 ~ 5.0
                     sensitivity = Math.min(5.0f, sensitivity + 0.5f);
-                    // 调节过程中不弹 Toast，只在松手时显示
+                    saveSensitivity();
                     volumeUpLastAdjustTime = now;
                 }
             }
@@ -348,7 +387,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
         if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
             if (event.getRepeatCount() == 0) {
-                volumeDownDownTime = event.getEventTime();
                 volumeDownLastAdjustTime = event.getEventTime();
                 volumeDownHasAdjusted = false;
             } else {
@@ -356,13 +394,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 if (now - volumeDownLastAdjustTime >= LONG_PRESS_THRESHOLD) {
                     volumeDownHasAdjusted = true;
                     sensitivity = Math.max(0.5f, sensitivity - 0.5f);
+                    saveSensitivity();
                     volumeDownLastAdjustTime = now;
                 }
             }
             return true;
         }
 
-        // 其他按键：发送扫描码（仅第一次按下时发送）
         if (event.getRepeatCount() == 0) {
             int scan = event.getScanCode();
             if (scan != 0) {
@@ -377,10 +415,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
             if (volumeUpHasAdjusted) {
-                // 长按调节后松手：显示最终灵敏度
                 Toast.makeText(this, "灵敏度: " + String.format("%.1f", sensitivity), Toast.LENGTH_SHORT).show();
             } else {
-                // 短按：切换模式
                 isTouchpadMode = !isTouchpadMode;
                 Toast.makeText(this, isTouchpadMode ? "触摸板模式（相对移动）" : "普通触摸模式（绝对定位）", Toast.LENGTH_SHORT).show();
                 resetTouchpadState();
@@ -393,7 +429,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             if (volumeDownHasAdjusted) {
                 Toast.makeText(this, "灵敏度: " + String.format("%.1f", sensitivity), Toast.LENGTH_SHORT).show();
             } else {
-                // 短按：切换虚拟键盘
                 if (keyboardView != null) {
                     try {
                         boolean show = keyboardView.getVisibility() == View.GONE;
@@ -417,7 +452,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             return true;
         }
 
-        // 其他按键
         int scan = event.getScanCode();
         if (scan != 0) {
             nativeSendKey(1, scan);
@@ -460,7 +494,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return super.onGenericMotionEvent(event);
     }
 
-    // ----- 绝对定位模式（鼠标跟随），竖屏时禁鼠标移动 -----
+    // ----- 绝对定位模式（竖屏不发送鼠标移动） -----
     private boolean handleTouchEventWithMouseFollow(MotionEvent event) {
         int action = event.getActionMasked();
 
@@ -478,7 +512,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 nativeSendMouseMotion(mouseX, mouseY, 0f, 0f);
             }
         } else {
-            // 竖屏：仅记录位置，不发送鼠标移动
             if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN ||
                     action == MotionEvent.ACTION_MOVE) {
                 if (event.getPointerCount() > 0) {
@@ -738,7 +771,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return true;
     }
 
-    // ----- 加速度计算（动态曲线） -----
+    // ----- 加速度计算 -----
     private float getAcceleration(float dx, float dy) {
         float distance = (float) Math.hypot(dx, dy);
         if (distance < 0.5f) return BASE_SCALE;
