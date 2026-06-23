@@ -421,10 +421,6 @@ void AnlandBackend::onReconnectTimer()
     if (layer) {
         layer->scheduleRepaint(nullptr);
     }
-
-    // After reconnecting, push the current KWin clipboard content to the
-    // consumer so the initial state is in sync.
-    onClipboardChanged();
 }
 
 // ---------------------------------------------------------------------------
