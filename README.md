@@ -723,14 +723,16 @@ stateDiagram-v2
 | V2 producer + V3 consumer | ❌ **流损坏** — V3 consumer 可能发送 `INPUT_TYPE_CLIPBOARD` 变长事件，V2 producer 的 `poll_input_event()` 不排空尾随负载 |
 | V3 producer + V2 consumer | ❌ **流损坏** — V3 producer 可能发送 `DATA_MSG_OUTPUT_EVENT`(103) 变长事件，V2 consumer 无法读取 |
 | V2 producer + V2 consumer | ✅ **正常工作** — 与 V2 行为一致 |
-| V1 producer + V3 `libdisplay_producer.so` | ✅ **正常工作** — V1 不调用 `poll_input_event()`，不触发流损坏 |
+| V1 producer + V3 `libdisplay_producer.so` | ❌ **流损坏** — V1 producer 调用 `poll_input_event()` 获取触摸/按键事件，当 V3 consumer 发送 `INPUT_TYPE_CLIPBOARD` 变长事件时，V1 代码不排空尾随负载，导致 data channel 流损坏 |
+| V1 producer + V3 consumer（无剪贴板） | ⚠️ **有条件正常** — 若 V3 consumer 从不发送剪贴板事件则不触发；但无法保证，V1 库无 `handle_unhandled_event()` 无法防御 |
 | V1 consumer + V3 `libdisplay_consumer.so` | ❌ **不兼容** — `refresh_done()` 返回 fence fd（V2 变更） |
 | V3 daemon + V2/V3 producer/consumer | ✅ **正常工作** — daemon 不感知 fd 语义 |
 
 > [!CAUTION]
-> **V2 producer 无法与 V3 consumer 混用**：即使 V2 producer 代码链接了 V3 库，
-> 如果其事件处理循环不调用 `handle_unhandled_event()`，当 V3 consumer 发送剪贴板
-> 事件时，data channel 流将被损坏。**必须修改代码**。
+> **V2/V1 producer 与 V3 consumer 混用会流损坏**：即使 V2/V1 producer 代码链接了
+> V3 库，如果其事件处理循环不调用 `handle_unhandled_event()`，当 V3 consumer 发送
+> 剪贴板事件时，`poll_input_event()` 只读取了固定大小的 `InputEvent` 结构体，
+> 尾随负载字节留在 socket 缓冲区中，data channel 流将被损坏。**必须修改应用代码**。
 >
 > **V2 consumer 无法与 V3 producer 混用**：V2 consumer 没有 `poll_output_event()`
 > 函数，无法读取 V3 producer 发送的 `DATA_MSG_OUTPUT_EVENT`(103) 消息。

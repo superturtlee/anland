@@ -1,6 +1,6 @@
 id=anland-daemon
-name=Virtual DRM Daemon
+name=Anland Daemon
 version=1.0
 versionCode=1
 author=anland
-description=Display daemon for virtual DRM buffer sharing
+description=Display daemon for Anland buffer sharing

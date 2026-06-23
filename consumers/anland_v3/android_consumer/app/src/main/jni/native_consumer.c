@@ -242,7 +242,7 @@ static void stop_event_thread(struct consumer_state *s)
     if (!s->event_running)
         return;
     s->event_running = false;
-    pthread_join(s->event_thread, NULL);
+    //pthread_join(s->event_thread, NULL);
 }
 
 static int do_connect(struct consumer_state *s)

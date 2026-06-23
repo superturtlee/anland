@@ -98,19 +98,33 @@ static void try_deliver_fds(void)
     fprintf(stderr, "daemon: fds delivered to producer\n");
 }
 
-static void handle_disconnect(struct client *c)
+/*
+ * Tear down whichever role this client holds, reset the associated state, then free
+ * it. Used both for real disconnects (EPOLLHUP / recv error) and to evict a stale
+ * client when a new one takes over the same role -- whether the old client is still
+ * alive or already a ghost, finding one is reason enough to drop it.
+ *
+ * The role pointer is cleared BEFORE client_free() so that any event still queued for
+ * this client in the current epoll batch fails the "is it a current role?" guard in
+ * the main loop and is skipped instead of dereferencing freed memory.
+ */
+static void drop_client(struct client *c)
 {
+    if (!c)
+        return;
     if (c == consumer) {
         fprintf(stderr, "daemon: consumer disconnected\n");
-        client_free(consumer);
         consumer = NULL;
+        /* The deposited fds belong to the consumer that just left; a future producer
+         * must never be handed this stale set. Drop them together with the consumer. */
+        clear_deposited_fds();
     } else if (c == producer) {
         fprintf(stderr, "daemon: producer disconnected\n");
-        client_free(producer);
         producer = NULL;
         producer_waiting_screen = false;
         producer_waiting_fds = false;
     }
+    client_free(c);
 }
 
 static void handle_client_data(struct client *c)
@@ -121,14 +135,14 @@ static void handle_client_data(struct client *c)
 
     int n = recv_fds(c->ctrl_fd, &hdr, sizeof(hdr), fds, MAX_FDS, &fd_count);
     if (n <= 0) {
-        handle_disconnect(c);
+        drop_client(c);
         return;
     }
 
     uint8_t payload[sizeof(struct screen_info)];
     if (hdr.size > 0) {
         if (hdr.size > sizeof(payload) || recv_all(c->ctrl_fd, payload, hdr.size) < 0) {
-            handle_disconnect(c);
+            drop_client(c);
             return;
         }
     }
@@ -193,8 +207,10 @@ static void handle_new_connection(int listen_fd)
     c->ctrl_fd = client_fd;
 
     if (hdr.type == CTRL_MSG_CONSUMER_HELLO) {
+        /* Evict any prior consumer (alive or ghost) and its stale deposit before this
+         * one takes over the role. */
         if (consumer)
-            client_free(consumer);
+            drop_client(consumer);
         c->is_consumer = true;
         consumer = c;
 
@@ -207,8 +223,9 @@ static void handle_new_connection(int listen_fd)
             try_deliver_fds();
 
     } else if (hdr.type == CTRL_MSG_PRODUCER_HELLO) {
+        /* Evict any prior producer (alive or ghost) before this one takes over. */
         if (producer)
-            client_free(producer);
+            drop_client(producer);
         c->is_consumer = false;
         producer = c;
         producer_waiting_screen = false;
@@ -273,8 +290,14 @@ int main(int argc, char **argv)
                 handle_new_connection(listen_fd);
             } else {
                 struct client *c = events[i].data.ptr;
+                /* A client freed earlier in this same batch -- a real disconnect, or
+                 * one evicted by a new connection taking over its role -- leaves a
+                 * stale event behind. Skip anything that is no longer a current role
+                 * so we never touch freed memory. */
+                if (c != consumer && c != producer)
+                    continue;
                 if (events[i].events & (EPOLLHUP | EPOLLERR))
-                    handle_disconnect(c);
+                    drop_client(c);
                 else
                     handle_client_data(c);
             }

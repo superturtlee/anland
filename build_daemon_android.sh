@@ -2,7 +2,6 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-NDK_DIR="$SCRIPT_DIR/build_tools/android-sdk/ndk/29.0.13113456"
 BUILD_DIR="$SCRIPT_DIR/build_daemon_android"
 
 rm -rf "$BUILD_DIR"
