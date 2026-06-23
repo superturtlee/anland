@@ -1,0 +1,71 @@
+diff --git a/src/backends/CMakeLists.txt b/src/backends/CMakeLists.txt
+index 93e1991..6d08333 100644
+--- a/src/backends/CMakeLists.txt
++++ b/src/backends/CMakeLists.txt
+@@ -1,3 +1,4 @@
++add_subdirectory(anland)
+ add_subdirectory(drm)
+ add_subdirectory(fakeinput)
+ add_subdirectory(libinput)
+diff --git a/src/main_wayland.cpp b/src/main_wayland.cpp
+index 26d51b4..d7baa81 100644
+--- a/src/main_wayland.cpp
++++ b/src/main_wayland.cpp
+@@ -10,6 +10,7 @@
+ 
+ #include "config-kwin.h"
+ 
++#include "backends/anland/anland_backend.h"
+ #include "backends/drm/drm_backend.h"
+ #include "backends/virtual/virtual_backend.h"
+ #include "backends/wayland/wayland_backend.h"
+@@ -346,6 +347,7 @@ int main(int argc, char *argv[])
+                                      i18n("Exits this instance so it can be restarted by kwin_wayland_wrapper."));
+ 
+     QCommandLineOption drmOption(QStringLiteral("drm"), i18n("Render through drm node."));
++    QCommandLineOption anlandOption(QStringLiteral("anland"), i18n("Render to the anland display daemon."));
+     QCommandLineOption locale1Option(QStringLiteral("locale1"), i18n("Extract locale information from locale1 rather than the user's configuration"));
+ 
+     QCommandLineParser parser;
+@@ -369,6 +371,7 @@ int main(int argc, char *argv[])
+     parser.addOption(scaleOption);
+     parser.addOption(outputCountOption);
+     parser.addOption(drmOption);
++    parser.addOption(anlandOption);
+     parser.addOption(locale1Option);
+ 
+     QCommandLineOption inputMethodOption(QStringLiteral("inputmethod"),
+@@ -430,6 +433,7 @@ int main(int argc, char *argv[])
+         X11,
+         Wayland,
+         Virtual,
++        Anland,
+     };
+ 
+     BackendType backendType;
+@@ -439,7 +443,9 @@ int main(int argc, char *argv[])
+     qreal outputScale = 1;
+ 
+     // Decide what backend to use.
+-    if (parser.isSet(drmOption)) {
++    if (parser.isSet(anlandOption) || qEnvironmentVariableIsSet("ANLAND_SOCKET")) {
++        backendType = BackendType::Anland;
++    } else if (parser.isSet(drmOption)) {
+         backendType = BackendType::Kms;
+ #if KWIN_BUILD_X11
+     } else if (parser.isSet(x11DisplayOption)) {
+@@ -544,6 +550,14 @@ int main(int argc, char *argv[])
+         }));
+         break;
+     }
++    case BackendType::Anland: {
++        // The display-daemon socket path comes from $ANLAND_SOCKET; the backend
++        // falls back to its built-in default (/tmp/display_daemon.sock) if unset.
++        const QString anlandSocket = qEnvironmentVariable("ANLAND_SOCKET");
++        a.setSession(KWin::Session::create(KWin::Session::Type::Noop));
++        a.setOutputBackend(std::make_unique<KWin::AnlandBackend>(anlandSocket));
++        break;
++    }
+     }
+ 
+     KWin::WaylandServer *server = KWin::WaylandServer::create();
