@@ -150,8 +150,9 @@ main() {
 
     build_pkg_makepkg kwin          "$kwin_patch" "$SCRIPT_DIR/kwin/src/backends/anland"
     build_pkg_makepkg xorg-xwayland "$xwl_patch"  ""
-    # CI workflow expects xwayland output under a fixed name
-    ln -sfn xorg-xwayland "$WORKDIR/xwayland" 2>/dev/null || true
+    # CI workflow expects xwayland output under a fixed name; copy packages there
+    mkdir -p "$WORKDIR/xwayland"
+    find "$WORKDIR/xorg-xwayland" -maxdepth 1 -name '*.pkg.tar.zst' -exec cp {} "$WORKDIR/xwayland/" \; 2>/dev/null || true
 
     log "Done. Patched kwin and Xwayland built and installed."
     echo "Built packages are under: $WORKDIR/{kwin,xorg-xwayland}/"

@@ -68,6 +68,7 @@ build_pkg_rpm() {
     log "Unpacking SRPM: $srpm"
     rpmdev-setuptree
     rm -f ~/rpmbuild/SPECS/*.spec
+    rm -rf ~/rpmbuild/RPMS/* ~/rpmbuild/SRPMS/*
     rpm -ivh --force "$srpm" \
         || die "rpm -ivh failed for $srpm"
 
@@ -137,8 +138,9 @@ main() {
 
     build_pkg_rpm kwin "$kwin_patch" "$SCRIPT_DIR/kwin/src/backends/anland"
     build_pkg_rpm xorg-x11-server-Xwayland "$xwl_patch" ""
-    # CI workflow expects xwayland output under a fixed name
-    ln -sfn xorg-x11-server-Xwayland "$WORKDIR/xwayland" 2>/dev/null || true
+    # CI workflow expects xwayland output under a fixed name; copy RPMs there
+    mkdir -p "$WORKDIR/xwayland"
+    find "$WORKDIR/xorg-x11-server-Xwayland" -maxdepth 1 -name '*.rpm' ! -name '*.src.*' -exec cp {} "$WORKDIR/xwayland/" \; 2>/dev/null || true
 
     log "Done. Patched kwin and Xwayland built and installed."
     echo "Built packages are under: $WORKDIR/{kwin,xorg-x11-server-Xwayland}/"
