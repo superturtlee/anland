@@ -32,6 +32,7 @@ namespace KWin
 class AnlandOutput;
 class AnlandInputDevice;
 class BackendOutput;
+class DrmDevice;
 class EglBackend;
 class EglDisplay;
 class InputBackend;
