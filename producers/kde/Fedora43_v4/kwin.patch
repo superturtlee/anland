@@ -1,9 +1,10 @@
---- a/src/inputmethod.cpp	2026-06-23 17:13:02.428068967 +0000
-+++ b/src/inputmethod.cpp	2026-06-23 17:13:02.428068967 +0000
-@@ -615,6 +615,16 @@
+--- a/src/inputmethod.cpp	2026-05-12 10:26:46.000000000 +0000
++++ b/src/inputmethod.cpp	2026-06-24 16:07:19.571120919 +0000
+@@ -615,6 +615,14 @@
      }
  }
  
++
 +void InputMethod::commitText(const QString &text)
 +{
 +    if (text.isEmpty()) {
@@ -11,13 +12,12 @@
 +    }
 +    commitString(m_serial++, text);
 +}
-+
  void InputMethod::commitString(qint32 serial, const QString &text)
  {
      if (auto t1 = waylandServer()->seat()->textInputV1(); t1 && t1->isEnabled()) {
---- a/src/inputmethod.h	2026-06-23 17:13:02.428068967 +0000
-+++ b/src/inputmethod.h	2026-06-23 17:13:02.428068967 +0000
-@@ -71,6 +71,13 @@
+--- a/src/inputmethod.h	2026-05-12 10:26:46.000000000 +0000
++++ b/src/inputmethod.h	2026-06-24 16:07:19.571367676 +0000
+@@ -71,6 +71,8 @@
  
      void commitPendingText();
  
@@ -26,15 +26,15 @@
      // for use by the QPA
      InternalInputMethodContext *internalContext() const
      {
---- a/src/backends/CMakeLists.txt	2026-06-23 17:13:02.428068967 +0000
-+++ b/src/backends/CMakeLists.txt	2026-06-23 17:11:51.746050818 +0000
+--- a/src/backends/CMakeLists.txt	2026-05-12 10:26:46.000000000 +0000
++++ b/src/backends/CMakeLists.txt	2026-06-24 16:07:19.571404526 +0000
 @@ -1,3 +1,4 @@
 +add_subdirectory(anland)
  add_subdirectory(drm)
  add_subdirectory(fakeinput)
  add_subdirectory(libinput)
---- a/src/main_wayland.cpp	2026-06-23 17:11:23.917573127 +0000
-+++ b/src/main_wayland.cpp	2026-06-23 17:12:43.599824664 +0000
+--- a/src/main_wayland.cpp	2026-05-12 10:26:46.000000000 +0000
++++ b/src/main_wayland.cpp	2026-06-24 16:07:19.571533592 +0000
 @@ -10,6 +10,7 @@
  
  #include "config-kwin.h"
@@ -78,13 +78,11 @@
          backendType = BackendType::Kms;
  #if KWIN_BUILD_X11
      } else if (parser.isSet(x11DisplayOption)) {
-@@ -562,6 +568,14 @@
+@@ -562,6 +568,12 @@
          }));
          break;
      }
 +    case BackendType::Anland: {
-+        // The display-daemon socket path comes from $ANLAND_SOCKET; the backend
-+        // falls back to its built-in default (/tmp/display_daemon.sock) if unset.
 +        const QString anlandSocket = qEnvironmentVariable("ANLAND_SOCKET");
 +        a.setSession(KWin::Session::create(KWin::Session::Type::Noop));
 +        a.setOutputBackend(std::make_unique<KWin::AnlandBackend>(anlandSocket));
