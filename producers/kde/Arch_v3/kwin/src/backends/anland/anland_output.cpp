@@ -69,12 +69,12 @@ void AnlandOutput::init(const QSize &pixelSize, int refresh, qreal scale)
     }
     m_renderLoop->setRefreshRate(refresh);
 
-    auto mode = std::make_shared<OutputMode>(pixelSize, refresh, OutputMode::Flag::Preferred);
+    auto mode = std::make_shared<OutputMode>(OutputModeline(pixelSize, refresh, OutputModeline::Flag::Preferred));
 
     setState(State{
         .position = QPoint(0, 0),
         .scale = scale,
-        .modes = {mode},
+        .modes = QList<std::shared_ptr<OutputMode>>{mode},
         .currentMode = mode,
     });
 }
@@ -97,9 +97,9 @@ void AnlandOutput::setRefreshRate(int refresh)
 
     // Keep the OutputMode in lockstep with the RenderLoop, mirroring init(), so
     // currentMode()->refreshRate() and any mode-based logic see the new rate.
-    auto mode = std::make_shared<OutputMode>(modeSize(), refresh, OutputMode::Flag::Preferred);
+    auto mode = std::make_shared<OutputMode>(OutputModeline(modeSize(), refresh, OutputModeline::Flag::Preferred));
     State next = m_state;
-    next.modes = {mode};
+    next.modes = QList<std::shared_ptr<OutputMode>>{mode};
     next.currentMode = mode;
     setState(next);
 }
@@ -135,9 +135,9 @@ void AnlandOutput::resize(const QSize &newSize)
     // Keep the same refresh rate; update both the OutputMode and the RenderLoop
     // pacing. Mirroring setRefreshRate() / init().
     const int refresh = m_renderLoop->refreshRate();
-    auto mode = std::make_shared<OutputMode>(newSize, refresh, OutputMode::Flag::Preferred);
+    auto mode = std::make_shared<OutputMode>(OutputModeline(newSize, refresh, OutputModeline::Flag::Preferred));
     State next = m_state;
-    next.modes = {mode};
+    next.modes = QList<std::shared_ptr<OutputMode>>{mode};
     next.currentMode = mode;
     setState(next);
 
