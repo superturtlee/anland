@@ -137,6 +137,8 @@ main() {
 
     build_pkg_rpm kwin "$kwin_patch" "$SCRIPT_DIR/kwin/src/backends/anland"
     build_pkg_rpm xorg-x11-server-Xwayland "$xwl_patch" ""
+    # CI workflow expects xwayland output under a fixed name
+    ln -sfn xorg-x11-server-Xwayland "$WORKDIR/xwayland" 2>/dev/null || true
 
     log "Done. Patched kwin and Xwayland built and installed."
     echo "Built packages are under: $WORKDIR/{kwin,xorg-x11-server-Xwayland}/"
