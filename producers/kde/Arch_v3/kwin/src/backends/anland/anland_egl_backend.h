@@ -16,6 +16,7 @@
 
 #include "core/outputlayer.h"
 #include "core/region.h"
+#include "core/drm_formats.h"
 #include "opengl/eglbackend.h"
 
 #include <array>
@@ -48,7 +49,7 @@ public:
     std::optional<OutputLayerBeginFrameInfo> doBeginFrame() override;
     bool doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame) override;
     DrmDevice *scanoutDevice() const override;
-    QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
+    FormatModifierMap supportedDrmFormats() const override;
     bool importBuffers(int count);
     void releaseBuffers() override;
 
@@ -77,7 +78,7 @@ public:
     AnlandEglBackend(AnlandBackend *b);
     ~AnlandEglBackend() override;
 
-    void init() override;
+    bool init() override;
     QList<OutputLayer *> compatibleOutputLayers(BackendOutput *output) override;
     DrmDevice *drmDevice() const override;
 

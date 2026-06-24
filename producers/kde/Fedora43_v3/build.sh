@@ -89,7 +89,11 @@ build_pkg_rpm() {
         sed -i '/^%autosetup/a mkdir -p %{_builddir}/%{name}-%{version}/src/backends/anland \&\& tar xf %{_sourcedir}/anland-overlay.tar -C %{_builddir}/%{name}-%{version}/src/backends/anland/' "$spec"
     fi
 
-    sed -i "/^Source0:/a Patch0: $patchbase" "$spec"
+    local first_source_line
+    first_source_line=$(grep -n "^Source0:" "$spec" | head -1 | cut -d: -f1)
+    if [ -n "$first_source_line" ]; then
+        sed -i "${first_source_line}a Patch0: $patchbase" "$spec"
+    fi
 
     local rel_line
     rel_line="$(grep -m1 '^Release:' "$spec")"
