@@ -80,6 +80,11 @@ build_pkg_makepkg() {
     [ -n "$pkgdir" ] || die "could not find PKGBUILD for $src"
     log "PKGBUILD dir: $pkgdir"
 
+    if grep -q '^arch=(.*x86_64' "$pkgdir/PKGBUILD" && ! grep -q 'aarch64' "$pkgdir/PKGBUILD"; then
+        sed -i 's/^arch=(\(.*\)x86_64\(.*\))/arch=(\1x86_64 aarch64\2)/' "$pkgdir/PKGBUILD"
+        log "Extended arch array to include aarch64"
+    fi
+
     local patchbase
     patchbase="$(basename "$patch")"
     cp "$patch" "$pkgdir/"
