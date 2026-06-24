@@ -11,6 +11,7 @@
 #include "anland_output.h"
 
 #include "core/drmdevice.h"
+#include "core/renderdevice.h"
 #include "core/renderloop.h"
 #include "opengl/egldisplay.h"
 #include "utils/filedescriptor.h"
@@ -26,6 +27,13 @@
 #include <QtConcurrent>
 
 #include <xf86drm.h>
+
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
+#ifndef EGL_PLATFORM_SURFACELESS_MESA
+#define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
+#endif
 
 #include <fcntl.h>
 #include <poll.h>
@@ -46,34 +54,57 @@ static const int s_reconnectIntervalMs = 200;
  * backend does), then the standard render node — which on the kgsl/turnip stack
  * is the msm node exposed at /dev/dri/renderD128.
  */
-static std::unique_ptr<DrmDevice> openRenderDevice()
+static std::unique_ptr<RenderDevice> openRenderDevice()
 {
     const QString override = qEnvironmentVariable("ANLAND_DRM_DEVICE");
-    if (!override.isEmpty()) {
-        if (auto dev = DrmDevice::open(override)) {
-            return dev;
-        }
-        qCWarning(KWIN_ANLAND) << "ANLAND_DRM_DEVICE" << override << "could not be opened";
-    }
 
-    const int count = drmGetDevices2(0, nullptr, 0);
-    if (count > 0) {
-        QList<drmDevice *> devices(count);
-        if (drmGetDevices2(0, devices.data(), devices.size()) >= 0) {
-            auto guard = qScopeGuard([&] {
-                drmFreeDevices(devices.data(), devices.size());
-            });
-            for (drmDevice *device : std::as_const(devices)) {
-                if (device->available_nodes & (1 << DRM_NODE_RENDER)) {
-                    if (auto dev = DrmDevice::open(QString::fromUtf8(device->nodes[DRM_NODE_RENDER]))) {
-                        return dev;
+    auto openDrm = [&]() -> std::unique_ptr<DrmDevice> {
+        if (!override.isEmpty()) {
+            if (auto dev = DrmDevice::open(override)) {
+                return dev;
+            }
+            qCWarning(KWIN_ANLAND) << "ANLAND_DRM_DEVICE" << override << "could not be opened";
+        }
+
+        const int count = drmGetDevices2(0, nullptr, 0);
+        if (count > 0) {
+            QList<drmDevice *> devices(count);
+            if (drmGetDevices2(0, devices.data(), devices.size()) >= 0) {
+                auto guard = qScopeGuard([&] {
+                    drmFreeDevices(devices.data(), devices.size());
+                });
+                for (drmDevice *device : std::as_const(devices)) {
+                    if (device->available_nodes & (1 << DRM_NODE_RENDER)) {
+                        if (auto dev = DrmDevice::open(QString::fromUtf8(device->nodes[DRM_NODE_RENDER]))) {
+                            return dev;
+                        }
                     }
                 }
             }
         }
+
+        return DrmDevice::open(QStringLiteral("/dev/dri/renderD128"));
+    };
+
+    std::unique_ptr<DrmDevice> drmDev = openDrm();
+    if (!drmDev) {
+        qCWarning(KWIN_ANLAND) << "no usable DRM render device";
+        return nullptr;
     }
 
-    return DrmDevice::open(QStringLiteral("/dev/dri/renderD128"));
+    EGLDisplay eglDpy = eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
+    if (eglDpy == EGL_NO_DISPLAY) {
+        qCWarning(KWIN_ANLAND) << "failed to get surfaceless EGL display";
+        return nullptr;
+    }
+
+    auto eglDisplay = EglDisplay::create(eglDpy, drmDev.get());
+    if (!eglDisplay) {
+        qCWarning(KWIN_ANLAND) << "failed to create EglDisplay";
+        return nullptr;
+    }
+
+    return std::make_unique<RenderDevice>(std::move(drmDev), std::move(eglDisplay));
 }
 
 AnlandBackend::AnlandBackend(const QString &socketPath, QObject *parent)
@@ -95,7 +126,7 @@ AnlandBackend::~AnlandBackend()
         ::disconnect(m_display); // C producer API, not QObject::disconnect
         m_display = nullptr;
     }
-    // m_eglDisplay (EglDisplay) tears down the EGLDisplay in its destructor; the
+    // m_renderDevice tears down the DrmDevice + EglDisplay in its destructor; the
     // 5.27-era manual eglTerminate(sceneEglDisplay()) is no longer needed.
 }
 
@@ -120,8 +151,8 @@ bool AnlandBackend::initialize()
 
     // KWin dereferences renderBackend->drmDevice() during OpenGL compositor
     // setup; without a real device it segfaults. Open one up front.
-    m_drmDevice = openRenderDevice();
-    if (!m_drmDevice) {
+    m_renderDevice = openRenderDevice();
+    if (!m_renderDevice) {
         qCWarning(KWIN_ANLAND) << "no usable DRM render device; cannot bring up OpenGL compositing";
         return false;
     }
@@ -182,12 +213,12 @@ QList<BackendOutput *> AnlandBackend::outputs() const
 
 EglDisplay *AnlandBackend::sceneEglDisplayObject() const
 {
-    return m_eglDisplay.get();
+    return m_renderDevice ? m_renderDevice->eglDisplay() : nullptr;
 }
 
-void AnlandBackend::setEglDisplay(std::unique_ptr<EglDisplay> &&display)
+DrmDevice *AnlandBackend::drmDevice() const
 {
-    m_eglDisplay = std::move(display);
+    return m_renderDevice ? m_renderDevice->drmDevice() : nullptr;
 }
 
 bool AnlandBackend::notifyFramePresented()

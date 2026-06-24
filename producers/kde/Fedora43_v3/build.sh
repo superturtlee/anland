@@ -67,6 +67,7 @@ build_pkg_rpm() {
 
     log "Unpacking SRPM: $srpm"
     rpmdev-setuptree
+    rm -f ~/rpmbuild/SPECS/*.spec
     rpm -ivh --force "$srpm" \
         || die "rpm -ivh failed for $srpm"
 
