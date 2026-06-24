@@ -227,7 +227,7 @@ DrmDevice *AnlandEglLayer::scanoutDevice() const
     return m_backend->drmDevice();
 }
 
-QHash<uint32_t, QList<uint64_t>> AnlandEglLayer::supportedDrmFormats() const
+FormatModifierMap AnlandEglLayer::supportedDrmFormats() const
 {
     return {};
 }
@@ -273,20 +273,20 @@ bool AnlandEglBackend::initializeEgl()
     return true;
 }
 
-void AnlandEglBackend::init()
+bool AnlandEglBackend::init()
 {
     if (!initializeEgl()) {
         setFailed("Could not initialize egl");
-        return;
+        return false;
     }
     if (!initRenderingContext()) {
         setFailed("Could not initialize rendering context");
-        return;
+        return false;
     }
 
     if (checkGLError("Init")) {
         setFailed("Error during init of AnlandEglBackend");
-        return;
+        return false;
     }
 
     initWayland();
@@ -298,6 +298,7 @@ void AnlandEglBackend::init()
 
     connect(m_backend, &AnlandBackend::outputAdded, this, &AnlandEglBackend::addOutput);
     connect(m_backend, &AnlandBackend::outputRemoved, this, &AnlandEglBackend::removeOutput);
+    return true;
 }
 
 bool AnlandEglBackend::initRenderingContext()
