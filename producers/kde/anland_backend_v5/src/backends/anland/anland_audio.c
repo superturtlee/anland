@@ -65,6 +65,9 @@ static struct anland_audio *g_audio = NULL;
 
 static int connect_stream(struct pw_stream *stream, enum spa_direction direction,
                           uint32_t rate, uint32_t channels, uint32_t quantum);
+static const struct spa_pod *build_format(struct spa_pod_builder *bld,
+                                          uint32_t rate, uint32_t channels);
+static void set_latency(struct pw_stream *stream, uint32_t quantum, uint32_t rate);
 
 /* ---- mic ring buffer (single-threaded: loop thread only) ---- */
 
@@ -168,8 +171,24 @@ static const struct pw_stream_events source_events = {
     .process = on_source_process,
 };
 
-/* Apply a consumer-announced format, reconnecting the matching stream if its rate or
- * channel count changed. Runs on the loop thread, so the pw_stream calls are safe. */
+/* Apply a consumer-announced format. The virtual device stays continuously online
+ * and is hot-plugged (disconnect + reconnect) ONLY when the format actually changes
+ * versus what the stream is currently running -- an unchanged announcement (the common
+ * case, including every consumer reconnect that re-sends the same format) is a no-op,
+ * so the node never churns and plasma-pa keeps resolving the default sink/source.
+ *
+ * Defaults are role-correct: a field left 0 means "device default", which must equal
+ * the value the stream was built with, otherwise the comparison below would treat an
+ * unset field as a change and re-plug on every announcement. (One bug was a CAPTURE
+ * announce with channels==0 defaulting to 2, never matching the mono source.)
+ *
+ * Every change is applied IN PLACE -- the node object (anland-speaker / anland-mic) is
+ * never destroyed, so WirePlumber/plasma-pa keep their default reference and never log
+ * "No object for name anland-speaker". A rate/channels change renegotiates the port
+ * format via pw_stream_update_params(); a quantum-only change (AAudio's framesPerBurst
+ * legitimately varies between opens) just updates node.latency. Neither disconnects.
+ *
+ * Runs on the loop thread, so the pw_stream calls are safe. */
 static void apply_format(struct anland_audio *a, const struct audio_format *f)
 {
     const bool playback = (f->role == AUDIO_ROLE_PLAYBACK);
@@ -181,23 +200,33 @@ static void apply_format(struct anland_audio *a, const struct audio_format *f)
     uint32_t *cur_channels = playback ? &a->play_channels : &a->cap_channels;
     uint32_t *cur_quantum  = playback ? &a->play_quantum : &a->cap_quantum;
     struct pw_stream *stream = playback ? a->capture : a->source;
-    const enum spa_direction dir = playback ? PW_DIRECTION_INPUT : PW_DIRECTION_OUTPUT;
 
-    if (rate == *cur_rate && channels == *cur_channels && f->quantum == *cur_quantum)
+    const bool format_changed = (rate != *cur_rate || channels != *cur_channels);
+    const bool quantum_changed = (f->quantum != *cur_quantum);
+    if (!format_changed && !quantum_changed)
         return;   /* unchanged -> keep the device online, no hot-plug */
 
     *cur_rate = rate;
     *cur_channels = channels;
     *cur_quantum = f->quantum;
 
-    /* Only a genuine format change hot-plugs the device. If PipeWire is not connected
-     * yet, build_pw() will pick up the new values when it (re)creates the stream. */
-    if (a->pw_connected && stream) {
-        pw_stream_disconnect(stream);
-        connect_stream(stream, dir, rate, channels, f->quantum);
+    if (!a->pw_connected || !stream)
+        return;   /* build_pw() will pick up the new values when it (re)creates the stream */
+
+    if (format_changed) {
+        /* Renegotiate the port format on the LIVE stream. update_params keeps the node
+         * object alive (same id) and re-runs format negotiation, so the default sink/
+         * source reference is never lost -- no churn, no plasma-pa "No object" spam. */
+        set_latency(stream, f->quantum, rate);
+        uint8_t buffer[1024];
+        struct spa_pod_builder bld = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+        const struct spa_pod *params[1] = { build_format(&bld, rate, channels) };
+        pw_stream_update_params(stream, params, 1);
+    } else if (f->quantum > 0) {
+        /* Latency-only tweak: node.latency in place, nothing renegotiates. */
+        set_latency(stream, f->quantum, rate);
     }
 }
-
 
 /* Mic PCM / format announcements arriving from the consumer. Runs on the loop thread. */
 static void on_audio_readable(void *data, int fd, uint32_t mask)
@@ -262,37 +291,48 @@ static const struct pw_core_events core_events = {
     .error = on_core_error,
 };
 
-static int connect_stream(struct pw_stream *stream, enum spa_direction direction,
-                          uint32_t rate, uint32_t channels, uint32_t quantum)
+/* Build an S16LE EnumFormat POD for rate/channels into the caller's builder. Stereo is
+ * L,R (FL,FR); anything else collapses to a plain mono channel. */
+static const struct spa_pod *build_format(struct spa_pod_builder *bld,
+                                          uint32_t rate, uint32_t channels)
 {
-    /* Apply the latency preset: node.latency = "quantum/rate" asks PipeWire to run
-     * this node at that buffer size. quantum == 0 leaves the graph default. */
-    if (quantum > 0) {
-        char latency[32];
-        snprintf(latency, sizeof(latency), "%u/%u", quantum, rate);
-        struct spa_dict_item items[] = {
-            SPA_DICT_ITEM_INIT(PW_KEY_NODE_LATENCY, latency),};
-        struct spa_dict dict = SPA_DICT_INIT(items, 1);
-        pw_stream_update_properties(stream, &dict);
-    }
-
-    uint8_t buffer[1024];
-    struct spa_pod_builder bld = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
     struct spa_audio_info_raw info = {
         .format = SPA_AUDIO_FORMAT_S16_LE,
         .rate = rate,
         .channels = channels,
     };
-    /* Stereo is L,R (FL,FR); anything else collapses to a plain mono channel. */
     if (channels >= 2) {
         info.position[0] = SPA_AUDIO_CHANNEL_FL;
         info.position[1] = SPA_AUDIO_CHANNEL_FR;
     } else {
         info.position[0] = SPA_AUDIO_CHANNEL_MONO;
     }
+    return spa_format_audio_raw_build(bld, SPA_PARAM_EnumFormat, &info);
+}
 
-    const struct spa_pod *params[1];
-    params[0] = spa_format_audio_raw_build(&bld, SPA_PARAM_EnumFormat, &info);
+/* node.latency = "quantum/rate" asks PipeWire to run this node at that buffer size.
+ * quantum == 0 leaves the graph default. Applied in place -- never re-plugs the node. */
+static void set_latency(struct pw_stream *stream, uint32_t quantum, uint32_t rate)
+{
+    if (quantum == 0)
+        return;
+    char latency[32];
+    snprintf(latency, sizeof(latency), "%u/%u", quantum, rate);
+    struct spa_dict_item items[] = {
+        SPA_DICT_ITEM_INIT(PW_KEY_NODE_LATENCY, latency),
+    };
+    struct spa_dict dict = SPA_DICT_INIT(items, 1);
+    pw_stream_update_properties(stream, &dict);
+}
+
+static int connect_stream(struct pw_stream *stream, enum spa_direction direction,
+                          uint32_t rate, uint32_t channels, uint32_t quantum)
+{
+    set_latency(stream, quantum, rate);
+
+    uint8_t buffer[1024];
+    struct spa_pod_builder bld = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+    const struct spa_pod *params[1] = { build_format(&bld, rate, channels) };
 
     return pw_stream_connect(stream, direction, PW_ID_ANY,
                              PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS |
