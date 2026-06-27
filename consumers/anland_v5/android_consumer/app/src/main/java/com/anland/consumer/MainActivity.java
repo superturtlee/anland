@@ -22,6 +22,7 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
@@ -33,7 +34,6 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 
 import java.nio.charset.StandardCharsets;
-
 
 public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private static final String TAG = "Anland";
@@ -79,6 +79,45 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private static final int EVDEV_DOWN = 108;
     private static final int EVDEV_DELETE = 111;
 
+    // ==================== 新增：触摸板相关设置 ====================
+    public static final String KEY_TOUCHPAD_MODE = "touchpad_mode";
+    public static final String KEY_MOUSE_SPEED = "mouse_speed";
+
+    private boolean isTouchpadMode = true;      // true=相对移动(触摸板), false=绝对定位(触摸屏)
+    private float mouseSpeed = 1.0f;            // 鼠标速度倍率
+
+    // 触摸板手势状态机
+    private static final int STATE_IDLE = 0;
+    private static final int STATE_ONE_FINGER = 1;
+    private static final int STATE_TWO_FINGER = 2;
+    private static final int STATE_DRAGGING = 3;
+    private int currentState = STATE_IDLE;
+
+    private float lastX1, lastY1;
+    private float startX1, startY1;
+    private float lastX2, lastY2;
+    private long downTime1;
+    private float touchSlop;
+
+    private boolean isSingleTapCandidate = false;
+    private boolean isTwoFingerTapCandidate = false;
+    private boolean isDraggingActive = false;
+
+    private long lastTapTime = 0;
+    private float lastTapX, lastTapY;
+    private boolean isDoubleTapPending = false;
+
+    private static final long TOUCH_LONG_PRESS_TIMEOUT = 500;
+    private boolean hasLongPressed = false;
+    private boolean isLongPressPossible = false;
+    private boolean isMultiFinger = false;
+
+    // 鼠标位置（用于相对模式）
+    private float mouseX = 0;
+    private float mouseY = 0;
+    private int screenWidth = 1920;
+    private int screenHeight = 1080;
+
     static {
         System.loadLibrary("anland_consumer");
     }
@@ -98,11 +137,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private native void nativeSendTextInput(byte[] data);
     private native void nativeSetMicEnabled(boolean enabled);
     private native void nativeSetAudioLatency(int speakerMs, int micMs);
+    private native void nativeSetCustomResolution(int width, int height);
+
     // Called from native event thread to set clipboard text on Android
     public void nativeSetClipboardText(String text) {
         ClipboardManager cm = getSystemService(ClipboardManager.class);
         if (cm != null) {
-            mLastSentClip = text;  // 记录，clipListener 回环时会比对跳过
+            mLastSentClip = text;
             cm.setPrimaryClip(ClipData.newPlainText("anland", text));
         }
     }
@@ -121,18 +162,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     private final ClipboardManager.OnPrimaryClipChangedListener clipListener =
-        () -> pushClipboard();
+            () -> pushClipboard();
 
     // Called from native C: true = register clip listener, false = unregister
     public void nativeClipListening(boolean enable) {
         ClipboardManager cm = getSystemService(ClipboardManager.class);
         if (cm == null) return;
         if (enable) {
-            if (mClipListening) return;  // already registered
+            if (mClipListening) return;
             cm.addPrimaryClipChangedListener(clipListener);
             mClipListening = true;
         } else {
-            if (!mClipListening) return;  // not registered
+            if (!mClipListening) return;
             cm.removePrimaryClipChangedListener(clipListener);
             mClipListening = false;
         }
@@ -158,15 +199,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     // Forwards the current display refresh rate to the daemon so KWin can repace
     // its RenderLoop. Re-fires on every onDisplayChanged (e.g. 60/90/120 switch).
     private final DisplayManager.DisplayListener displayListener =
-        new DisplayManager.DisplayListener() {
-            @Override public void onDisplayAdded(int displayId) {}
-            @Override public void onDisplayRemoved(int displayId) {}
-            @Override public void onDisplayChanged(int displayId) {
-                Display d = getDisplay();
-                if (d != null && d.getDisplayId() == displayId)
-                    pushRefreshRate();
-            }
-        };
+            new DisplayManager.DisplayListener() {
+                @Override public void onDisplayAdded(int displayId) {}
+                @Override public void onDisplayRemoved(int displayId) {}
+                @Override public void onDisplayChanged(int displayId) {
+                    Display d = getDisplay();
+                    if (d != null && d.getDisplayId() == displayId)
+                        pushRefreshRate();
+                }
+            };
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
@@ -197,13 +238,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         nativeConfigure(sock.trim(), useRoot, helperPath, bridgePath);
         int customW = prefs.getInt("custom_width", 0);
         int customH = prefs.getInt("custom_height", 0);
-        customScreenWidth = prefs.getInt("custom_width", 0);
-        customScreenHeight = prefs.getInt("custom_height", 0);
+        customScreenWidth = customW;
+        customScreenHeight = customH;
         nativeSetCustomResolution(customW, customH);
     }
-    
-    private native void nativeSetCustomResolution(int width, int height);
-    
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -212,23 +251,30 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-        // Take over inset handling: the IME insets are dispatched to our
-        // OnApplyWindowInsetsListener (so we can resize the surface) instead of
-        // the system auto-panning the fullscreen window.
+        // Take over inset handling
         getWindow().setDecorFitsSystemWindows(false);
+
+        // ---- 新增：加载触摸板设置 ----
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        isTouchpadMode = prefs.getBoolean(KEY_TOUCHPAD_MODE, true);
+        mouseSpeed = prefs.getFloat(KEY_MOUSE_SPEED, 1.0f);
+        mouseSpeed = Math.max(0.5f, Math.min(5.0f, mouseSpeed));
+
+        touchSlop = ViewConfiguration.get(this).getScaledTouchSlop();
+        updateScreenSize();
+        mouseX = screenWidth / 2f;
+        mouseY = screenHeight / 2f;
 
         surfaceView = new SurfaceView(this);
         initHiddenInput();
 
         FrameLayout root = new FrameLayout(this);
         root.addView(surfaceView, new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT));
-        // 1x1 so the IME target never overlaps the surface and steals touches.
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
         root.addView(hiddenInput, new FrameLayout.LayoutParams(1, 1));
 
-        // Bottom extra-keys bar (Termux-style). Hidden by default; toggled by the
-        // settings switch and synced in onResume. Height mirrors Termux: 37.5dp/row.
+        // Bottom extra-keys bar
         float density = getResources().getDisplayMetrics().density;
         mBarHeight = Math.round(37.5f * density * ExtraKeysBar.rowCount());
         extraKeysBar = new ExtraKeysBar(this, new ExtraKeysBar.Sender() {
@@ -243,15 +289,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         });
         extraKeysBar.setVisibility(View.GONE);
         root.addView(extraKeysBar, new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, mBarHeight, Gravity.BOTTOM));
+                FrameLayout.LayoutParams.MATCH_PARENT, mBarHeight, Gravity.BOTTOM));
 
         setContentView(root);
         surfaceView.getHolder().addCallback(this);
 
         root.setOnApplyWindowInsetsListener((v, insets) -> {
-            // When the IME hides by any means (toggle, system back, or the IME's
-            // own close button), release the hidden input so its focus state
-            // stays in sync — otherwise reopening needs a second press.
             if (!insets.isVisible(WindowInsets.Type.ime()))
                 releaseHiddenInput();
             applyImeInset(insets);
@@ -267,10 +310,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         if (ctrl != null) {
             ctrl.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
             ctrl.setSystemBarsBehavior(
-                WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         }
         getWindow().getAttributes().layoutInDisplayCutoutMode =
-            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
     }
 
     private void setupCursorHiding() {
@@ -284,15 +327,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // Re-check accessibility service state on resume
         KeyInterceptor.recheck();
 
-        // Sync extra-keys bar visibility with the settings switches. With auto-show
-        // ON the bar tracks the keyboard (hidden now if the IME isn't up); with it
-        // OFF the master switch decides. See shouldShowBar.
+        // Sync extra-keys bar visibility
         setExtraKeysBarVisible(shouldShowBar(isImeVisible()));
 
         setupFullscreen();
         DisplayManager dm = getSystemService(DisplayManager.class);
         if (dm != null)
             dm.registerDisplayListener(displayListener, null);
+
+        // ---- 重新读取触摸板设置（可能被SettingsActivity修改） ----
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        isTouchpadMode = prefs.getBoolean(KEY_TOUCHPAD_MODE, true);
+        mouseSpeed = prefs.getFloat(KEY_MOUSE_SPEED, 1.0f);
+        mouseSpeed = Math.max(0.5f, Math.min(5.0f, mouseSpeed));
+
         if (surfaceReady) {
             nativeStop();
             applyConnectionConfig();
@@ -312,14 +360,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         nativeStop();
     }
 
-    /*
-     * Forward the mic only when the user enabled it AND RECORD_AUDIO is granted.
-     * If enabled but not yet granted, request it; onRequestPermissionsResult applies
-     * the result. Safe to call after every nativeStart (re)connect.
-     */
-    /* Push the speaker/mic latency presets to native (which forwards them to the
-     * producer's PipeWire nodes). Safe to call after every (re)connect and whenever
-     * the user changes a preset. */
     private void applyAudioLatency() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         int speakerMs = prefs.getInt(KEY_SPEAKER_LATENCY_MS, 0);
@@ -339,7 +379,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             nativeSetMicEnabled(true);
         } else {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},
-                               REQ_RECORD_AUDIO);
+                    REQ_RECORD_AUDIO);
         }
     }
 
@@ -370,6 +410,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         pushRefreshRate();
         applyMicState();
         applyAudioLatency();
+        updateScreenSize();
+        mouseX = clamp(mouseX, 0, screenWidth);
+        mouseY = clamp(mouseY, 0, screenHeight);
     }
 
     @Override
@@ -378,37 +421,42 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         nativeStop();
     }
 
+    private void updateScreenSize() {
+        android.graphics.Point size = new android.graphics.Point();
+        getWindowManager().getDefaultDisplay().getSize(size);
+        screenWidth = size.x;
+        screenHeight = size.y;
+    }
+
+    private float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    // ---------- IME / Keyboard related ----------
     private void initHiddenInput() {
         imm = getSystemService(InputMethodManager.class);
 
-        // Anonymous subclass so we can hand the IME our own InputConnection that
-        // forwards text/keys to the remote in real time instead of buffering
-        // them in an Editable that only flushes on Enter.
         hiddenInput = new EditText(this) {
             @Override
             public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
-                super.onCreateInputConnection(outAttrs); // fills outAttrs only
+                super.onCreateInputConnection(outAttrs);
                 return new ForwardingInputConnection(this);
             }
         };
         hiddenInput.setBackgroundColor(Color.TRANSPARENT);
         hiddenInput.setCursorVisible(false);
         hiddenInput.setAlpha(0f);
-        hiddenInput.setEnabled(false);          // 默认不拦截触摸
+        hiddenInput.setEnabled(false);
         hiddenInput.setFocusable(false);
         hiddenInput.setFocusableInTouchMode(false);
         hiddenInput.setClickable(false);
         hiddenInput.setLongClickable(false);
-        // NO_ENTER_ACTION: deliver Enter as a key event we can forward, rather
-        // than an editor action we'd have to swallow. NO_FULLSCREEN: never show
-        // the landscape extract editor, which buffers text instead of sending it
-        // live through our InputConnection.
         hiddenInput.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            | EditorInfo.IME_FLAG_NO_FULLSCREEN
-            | EditorInfo.IME_FLAG_NO_ENTER_ACTION);
+                | EditorInfo.IME_FLAG_NO_FULLSCREEN
+                | EditorInfo.IME_FLAG_NO_ENTER_ACTION);
         hiddenInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT
-            | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            | android.text.InputType.TYPE_TEXT_VARIATION_NORMAL);
+                | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                | android.text.InputType.TYPE_TEXT_VARIATION_NORMAL);
     }
 
     private void sendText(String text) {
@@ -421,17 +469,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         nativeSendKey(1, evdevCode);
     }
 
-    // Maps soft-keyboard characters to Android key codes so a bar modifier can be
-    // combined with them. Shared instance; KeyCharacterMap.getEvents is read-only.
     private final KeyCharacterMap mVirtualKcm =
-        KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD);
+            KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD);
 
-    /*
-     * If an extra-keys-bar modifier (CTRL/ALT/SHIFT) is currently held, take the
-     * first key-mappable character of `s` and send it as a modifier combo (e.g.
-     * Ctrl+C) through the bar, which also clears the unlocked modifiers. Returns
-     * true if the input was consumed this way, false to fall back to plain text.
-     */
     private boolean maybeSendModifierCombo(String s) {
         if (extraKeysBar == null || !extraKeysBar.hasActiveModifier()
                 || s == null || s.isEmpty())
@@ -446,8 +486,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return false;
     }
 
-    // Convert a character to an evdev scancode via the virtual key character map
-    // and KeyCodeMapper. Returns -1 if it can't be expressed as a single key.
     private int charToEvdev(char ch) {
         KeyEvent[] events = mVirtualKcm.getEvents(new char[]{ch});
         if (events != null) {
@@ -461,8 +499,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return -1;
     }
 
-    // Map the few Android key codes a soft keyboard delivers as key events to the
-    // evdev keycodes KWin expects. Returns 0 for keys we don't forward.
     private static int toEvdevKey(int keyCode) {
         switch (keyCode) {
             case KeyEvent.KEYCODE_ENTER:
@@ -479,16 +515,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         }
     }
 
-    /*
-     * Bridges the soft keyboard to the remote compositor in real time. Committed
-     * text is forwarded as UTF-8 immediately; composing (preedit) text is
-     * forwarded as it changes by diffing against what we already sent, so each
-     * keystroke shows up live without waiting for Enter. Editing keys (Enter,
-     * Backspace, ...) are forwarded as evdev key taps. We keep no Editable of our
-     * own, so nothing accumulates between commits.
-     */
     private final class ForwardingInputConnection extends BaseInputConnection {
-        // What we have already forwarded for the in-progress composition.
         private final StringBuilder composing = new StringBuilder();
 
         ForwardingInputConnection(View target) {
@@ -498,14 +525,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         @Override
         public boolean commitText(CharSequence text, int newCursorPosition) {
             final String s = text == null ? "" : text.toString();
-            // If a bar modifier (CTRL/ALT/...) is held, combine it with the typed
-            // character and send as a key combo instead of inserting text.
             if (maybeSendModifierCombo(s)) {
                 composing.setLength(0);
                 return true;
             }
-            // Fast path: the commit just finalizes the current composition
-            // unchanged — already forwarded, so only drop the tracker.
             if (composing.length() > 0 && composing.toString().equals(s)) {
                 composing.setLength(0);
                 return true;
@@ -528,27 +551,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
         @Override
         public boolean finishComposingText() {
-            composing.setLength(0); // accepted as-is; keep what we forwarded
+            composing.setLength(0);
             return true;
         }
 
         @Override
         public boolean deleteSurroundingText(int beforeLength, int afterLength) {
-            for (int i = 0; i < beforeLength; i++) {
-                tapKey(EVDEV_BACKSPACE);
-            }
-            for (int i = 0; i < afterLength; i++) {
-                tapKey(EVDEV_DELETE);
-            }
+            for (int i = 0; i < beforeLength; i++) tapKey(EVDEV_BACKSPACE);
+            for (int i = 0; i < afterLength; i++) tapKey(EVDEV_DELETE);
             return true;
         }
 
         @Override
         public boolean sendKeyEvent(KeyEvent event) {
             final int evdev = toEvdevKey(event.getKeyCode());
-            if (evdev == 0) {
-                return super.sendKeyEvent(event);
-            }
+            if (evdev == 0) return super.sendKeyEvent(event);
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 nativeSendKey(0, evdev);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
@@ -557,8 +574,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             return true;
         }
 
-        // Forward only the delta between the previously-sent composition and the
-        // new one: backspace the changed tail, then send the new tail.
         private void replaceComposing(String next) {
             final String prev = composing.toString();
             int prefix = 0;
@@ -567,12 +582,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 prefix++;
             }
             if (prefix > 0 && Character.isHighSurrogate(prev.charAt(prefix - 1))) {
-                prefix--; // never split a surrogate pair
+                prefix--;
             }
             final int erase = prev.codePointCount(prefix, prev.length());
-            for (int i = 0; i < erase; i++) {
-                tapKey(EVDEV_BACKSPACE);
-            }
+            for (int i = 0; i < erase; i++) tapKey(EVDEV_BACKSPACE);
             if (prefix < next.length()) {
                 sendText(next.substring(prefix));
             }
@@ -582,36 +595,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
         private void eraseComposing() {
             final int erase = composing.codePointCount(0, composing.length());
-            for (int i = 0; i < erase; i++) {
-                tapKey(EVDEV_BACKSPACE);
-            }
+            for (int i = 0; i < erase; i++) tapKey(EVDEV_BACKSPACE);
             composing.setLength(0);
         }
     }
 
-    // Shrink the surface to the area above the keyboard (and the extra-keys bar,
-    // if shown) by giving it a bottom margin. The size change flows through
-    // surfaceChanged -> nativeStart and the producer's resize path, so the
-    // focused window relayouts into the upper region instead of hiding behind
-    // the keyboard. Reset when the IME goes away.
     private void applyImeInset(WindowInsets insets) {
         int newImeBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
         boolean imeVisible = newImeBottom > 0;
         boolean wasImeVisible = mImeBottom > 0;
-    
+
         mImeBottom = newImeBottom;
-    
+
         if (imeVisible != wasImeVisible)
             setExtraKeysBarVisible(shouldShowBar(imeVisible));
 
         relayout();
     }
 
-    // Desired extra-keys bar visibility for the current keyboard state. The two
-    // switches are independent: with "auto-show" ON the bar tracks the keyboard
-    // (regardless of the master switch), so it appears whenever the IME opens —
-    // including via the bound virtual-keyboard key, the app's only other opener.
-    // With "auto-show" OFF the master switch keeps the bar persistently visible.
     private boolean shouldShowBar(boolean imeVisible) {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         boolean autoShow = prefs.getBoolean(KEY_AUTO_SHOW_EXTRA_KEYS, true);
@@ -620,17 +621,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return prefs.getBoolean(KEY_EXTRA_KEYS_ENABLED, false);
     }
 
-    // Recompute the surface bottom margin and the bar position from the current
-    // IME inset and bar visibility. The surface ends above the bar, which sits
-    // directly on top of the IME: "surface / extra-keys bar / IME" bottom-up.
     private void relayout() {
         boolean barVisible = extraKeysBar != null && extraKeysBar.getVisibility() == View.VISIBLE;
         int barH = barVisible ? mBarHeight : 0;
         int target = mImeBottom + barH;
 
         FrameLayout.LayoutParams lp =
-            (FrameLayout.LayoutParams) surfaceView.getLayoutParams();
-        if (lp.bottomMargin != target) {       // skip redundant surface restart
+                (FrameLayout.LayoutParams) surfaceView.getLayoutParams();
+        if (lp.bottomMargin != target) {
             lp.bottomMargin = target;
             surfaceView.setLayoutParams(lp);
         }
@@ -638,8 +636,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             extraKeysBar.setTranslationY(-mImeBottom);
     }
 
-    // Show/hide the extra-keys bar and re-apply the layout so the display area
-    // is compressed (shown) or restored (hidden).
     private void setExtraKeysBarVisible(boolean visible) {
         if (extraKeysBar == null) return;
         boolean cur = extraKeysBar.getVisibility() == View.VISIBLE;
@@ -655,7 +651,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     private void releaseHiddenInput() {
-        if (!hiddenInput.isEnabled()) return;  // already released
+        if (!hiddenInput.isEnabled()) return;
         hiddenInput.clearFocus();
         hiddenInput.setFocusable(false);
         hiddenInput.setEnabled(false);
@@ -676,49 +672,258 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         }
     }
 
+    // ==================== 触摸事件（分支） ====================
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (isMouseEvent(event)) {
-            int cls = event.getClassification();
-            if (cls == CLASSIFICATION_TWO_FINGER_SWIPE)
-                return handleTouchpadScroll(event);
-            if (cls == CLASSIFICATION_MULTI_FINGER_SWIPE || cls == CLASSIFICATION_PINCH)
-                return handleTouchEvent(event);
-            return handleMouseEvent(event);
+        if (isTouchpadMode) {
+            return handleTouchpadGesture(event);
+        } else {
+            // 绝对定位模式：保留原绝对触摸逻辑
+            return handleAbsoluteTouch(event);
         }
-        return handleTouchEvent(event);
     }
 
-    @Override
-    public boolean onGenericMotionEvent(MotionEvent event) {
-        if (isMouseEvent(event)) {
-            int action = event.getActionMasked();
-            if (action == MotionEvent.ACTION_HOVER_MOVE) {
-                        
-                // Масштабирование
-                float scaleX = (customScreenWidth > 0 && viewWidth > 0) ? 
-                        (float)customScreenWidth / viewWidth : 1.0f;
-                float scaleY = (customScreenHeight > 0 && viewHeight > 0) ? 
-                        (float)customScreenHeight / viewHeight : 1.0f;
-        
-                nativeSendMouseMotion(event.getX()*scaleX, event.getY()*scaleY,
-                                      event.getAxisValue(MotionEvent.AXIS_RELATIVE_X),
-                                      event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y));
+    // ---- 原有绝对触摸逻辑（原 handleTouchEvent，重命名） ----
+    private boolean handleAbsoluteTouch(MotionEvent event) {
+        int action = event.getActionMasked();
+        int pointerIdx = event.getActionIndex();
+        int pointerId = event.getPointerId(pointerIdx);
+
+        float scaleX = (customScreenWidth > 0 && viewWidth > 0) ?
+                (float)customScreenWidth / viewWidth : 1.0f;
+        float scaleY = (customScreenHeight > 0 && viewHeight > 0) ?
+                (float)customScreenHeight / viewHeight : 1.0f;
+
+        switch (action) {
+            case MotionEvent.ACTION_DOWN:
+            case MotionEvent.ACTION_POINTER_DOWN:
+                nativeSendTouch(0,
+                        event.getX(pointerIdx) * scaleX,
+                        event.getY(pointerIdx) * scaleY,
+                        pointerId);
+                nativeSendTouchFrame();
                 return true;
-            }
-            if (action == MotionEvent.ACTION_SCROLL) {
-                float vScroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL);
-                float hScroll = event.getAxisValue(MotionEvent.AXIS_HSCROLL);
-                if (vScroll != 0)
-                    nativeSendMouseScroll(0, -vScroll * 10);
-                if (hScroll != 0)
-                    nativeSendMouseScroll(1, hScroll * 10);
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_POINTER_UP:
+                nativeSendTouch(1,
+                        event.getX(pointerIdx) * scaleX,
+                        event.getY(pointerIdx) * scaleY,
+                        pointerId);
+                nativeSendTouchFrame();
                 return true;
-            }
+            case MotionEvent.ACTION_MOVE:
+                for (int i = 0; i < event.getPointerCount(); i++) {
+                    nativeSendTouch(2,
+                            event.getX(i) * scaleX,
+                            event.getY(i) * scaleY,
+                            event.getPointerId(i));
+                }
+                nativeSendTouchFrame();
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                for (int i = 0; i < event.getPointerCount(); i++) {
+                    nativeSendTouch(1,
+                            event.getX(i) * scaleX,
+                            event.getY(i) * scaleY,
+                            event.getPointerId(i));
+                }
+                nativeSendTouchFrame();
+                return true;
         }
-        return super.onGenericMotionEvent(event);
+        return false;
     }
 
+    // ---- 新增：触摸板模式（相对移动） ----
+    private boolean handleTouchpadGesture(MotionEvent event) {
+        int action = event.getActionMasked();
+        int pointerCount = event.getPointerCount();
+
+        switch (action) {
+            case MotionEvent.ACTION_DOWN: {
+                float x = event.getX();
+                float y = event.getY();
+                startX1 = lastX1 = x;
+                startY1 = lastY1 = y;
+                downTime1 = event.getEventTime();
+                hasLongPressed = false;
+                isLongPressPossible = true;
+                isSingleTapCandidate = true;
+                isTwoFingerTapCandidate = false;
+                isDraggingActive = false;
+                isMultiFinger = false;
+                currentState = STATE_ONE_FINGER;
+                break;
+            }
+            case MotionEvent.ACTION_POINTER_DOWN: {
+                isMultiFinger = true;
+                isSingleTapCandidate = false;
+                isLongPressPossible = false;
+                if (currentState == STATE_DRAGGING) {
+                    nativeSendMouseButton(0x110, false); // BTN_LEFT up
+                    isDraggingActive = false;
+                }
+                if (pointerCount == 2) {
+                    currentState = STATE_TWO_FINGER;
+                    isTwoFingerTapCandidate = true;
+                    lastX1 = event.getX(0);
+                    lastY1 = event.getY(0);
+                    lastX2 = event.getX(1);
+                    lastY2 = event.getY(1);
+                }
+                break;
+            }
+            case MotionEvent.ACTION_MOVE: {
+                if (pointerCount == 1 && !isMultiFinger) {
+                    float x = event.getX();
+                    float y = event.getY();
+                    float dx = x - lastX1;
+                    float dy = y - lastY1;
+                    float dist = (float) Math.hypot(x - startX1, y - startY1);
+
+                    if (dist > touchSlop) {
+                        isLongPressPossible = false;
+                        isSingleTapCandidate = false;
+                    }
+
+                    // 长按拖动
+                    if (isLongPressPossible && !hasLongPressed &&
+                            (event.getEventTime() - downTime1) >= TOUCH_LONG_PRESS_TIMEOUT) {
+                        hasLongPressed = true;
+                        currentState = STATE_DRAGGING;
+                        isDraggingActive = true;
+                        nativeSendMouseButton(0x110, true); // BTN_LEFT down
+                        // 确保鼠标位置在屏幕内
+                        mouseX = clamp(mouseX, 0, screenWidth);
+                        mouseY = clamp(mouseY, 0, screenHeight);
+                        nativeSendMouseMotion(mouseX, mouseY, 0f, 0f);
+                        break;
+                    }
+
+                    if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+                        // 应用鼠标速度
+                        float effectiveSpeed = mouseSpeed;
+                        mouseX = clamp(mouseX + dx * effectiveSpeed, 0, screenWidth);
+                        mouseY = clamp(mouseY + dy * effectiveSpeed, 0, screenHeight);
+                        nativeSendMouseMotion(mouseX, mouseY, 0f, 0f);
+                        lastX1 = x;
+                        lastY1 = y;
+                    }
+                } else if (pointerCount == 2) {
+                    if (currentState == STATE_TWO_FINGER) {
+                        float x1 = event.getX(0);
+                        float y1 = event.getY(0);
+                        float x2 = event.getX(1);
+                        float y2 = event.getY(1);
+                        float avgDx = ((x1 - lastX1) + (x2 - lastX2)) / 2;
+                        float avgDy = ((y1 - lastY1) + (y2 - lastY2)) / 2;
+
+                        if (Math.abs(avgDx) > 1 || Math.abs(avgDy) > 1) {
+                            isTwoFingerTapCandidate = false;
+                            // 垂直滚动
+                            if (Math.abs(avgDy) > Math.abs(avgDx) * 0.5) {
+                                nativeSendMouseScroll(0, -avgDy * 0.5f);
+                            }
+                            // 水平滚动
+                            if (Math.abs(avgDx) > Math.abs(avgDy) * 0.5) {
+                                nativeSendMouseScroll(1, avgDx * 0.5f);
+                            }
+                            lastX1 = x1;
+                            lastY1 = y1;
+                            lastX2 = x2;
+                            lastY2 = y2;
+                        }
+                    }
+                }
+                break;
+            }
+            case MotionEvent.ACTION_POINTER_UP: {
+                int remaining = pointerCount - 1;
+                if (remaining == 1) {
+                    isMultiFinger = false;
+                    isSingleTapCandidate = false;
+                    isLongPressPossible = false;
+                    int idx = (event.getActionIndex() == 0) ? 1 : 0;
+                    lastX1 = event.getX(idx);
+                    lastY1 = event.getY(idx);
+                    startX1 = lastX1;
+                    startY1 = lastY1;
+                    downTime1 = event.getEventTime();
+                    hasLongPressed = false;
+                    currentState = STATE_ONE_FINGER;
+                }
+                break;
+            }
+            case MotionEvent.ACTION_UP: {
+                long duration = event.getEventTime() - downTime1;
+                boolean isQuickTap = duration < 300;
+
+                if (isDraggingActive) {
+                    nativeSendMouseButton(0x110, false); // BTN_LEFT up
+                    isDraggingActive = false;
+                    resetTouchpadState();
+                    return true;
+                }
+
+                // 双指轻触 = 右键
+                if (isTwoFingerTapCandidate && isQuickTap) {
+                    nativeSendMouseButton(0x111, true); // BTN_RIGHT down
+                    nativeSendMouseButton(0x111, false);
+                    resetTouchpadState();
+                    return true;
+                }
+
+                // 单指轻触 = 左键（双击检测）
+                if (currentState == STATE_ONE_FINGER && isSingleTapCandidate && isQuickTap) {
+                    long gap = event.getEventTime() - lastTapTime;
+                    float dist = (float) Math.hypot(lastX1 - lastTapX, lastY1 - lastTapY);
+                    if (gap < 300 && dist < touchSlop && !isDoubleTapPending) {
+                        // 双击
+                        isDoubleTapPending = true;
+                        nativeSendMouseButton(0x110, true);
+                        nativeSendMouseButton(0x110, false);
+                        nativeSendMouseButton(0x110, true);
+                        nativeSendMouseButton(0x110, false);
+                        isDoubleTapPending = false;
+                        lastTapTime = 0;
+                    } else {
+                        // 单击
+                        nativeSendMouseButton(0x110, true);
+                        nativeSendMouseButton(0x110, false);
+                        lastTapTime = event.getEventTime();
+                        lastTapX = lastX1;
+                        lastTapY = lastY1;
+                        isDoubleTapPending = false;
+                    }
+                    resetTouchpadState();
+                    return true;
+                }
+                resetTouchpadState();
+                break;
+            }
+            case MotionEvent.ACTION_CANCEL: {
+                if (isDraggingActive) {
+                    nativeSendMouseButton(0x110, false);
+                    isDraggingActive = false;
+                }
+                resetTouchpadState();
+                break;
+            }
+        }
+        return true;
+    }
+
+    private void resetTouchpadState() {
+        currentState = STATE_IDLE;
+        isSingleTapCandidate = false;
+        isTwoFingerTapCandidate = false;
+        isDoubleTapPending = false;
+        hasLongPressed = false;
+        isDraggingActive = false;
+        isLongPressPossible = false;
+        isMultiFinger = false;
+    }
+
+    // ==================== 按键事件（完全保留原始逻辑，无音量特殊功能） ====================
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (event.getRepeatCount() > 0)
@@ -737,7 +942,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             return true;
         }
 
-        // fallback: when scancode is 0 (e.g. Fn key combos), map via KeyCodeMapper
         int evdev = KeyCodeMapper.getScanCode(keyCode);
         if (evdev != -1) {
             nativeSendKey(0, evdev);
@@ -746,15 +950,29 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return true;
     }
 
-    // Called from KeyInterceptor (accessibility service) to handle keys that
-    // the normal onKeyDown/onKeyUp might miss (e.g. Fn combos).
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        int scanCode = event.getScanCode();
+        if (scanCode != 0) {
+            nativeSendKey(1, scanCode);
+            return true;
+        }
+
+        int evdev = KeyCodeMapper.getScanCode(keyCode);
+        if (evdev != -1) {
+            nativeSendKey(1, evdev);
+            return true;
+        }
+        return true;
+    }
+
+    // Called from KeyInterceptor
     public boolean handleAccessibilityKey(KeyEvent event) {
         if (event.getRepeatCount() > 0)
             return true;
 
         int scanCode = event.getScanCode();
         if (scanCode != 0 && event.getKeyCode() == KeyEvent.KEYCODE_UNKNOWN) {
-            // Some Fn combos deliver KEYCODE_UNKNOWN with a valid scancode
             nativeSendKey(event.getAction() == KeyEvent.ACTION_DOWN ? 0 : 1, scanCode);
             return true;
         }
@@ -765,7 +983,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             return true;
         }
 
-        // If both keyCode and scancode are unknown, store/replay raw scancode anyway
         if (scanCode != 0) {
             nativeSendKey(event.getAction() == KeyEvent.ACTION_DOWN ? 0 : 1, scanCode);
             return true;
@@ -778,35 +995,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 .getBoolean(KEY_ACCESSIBILITY_ENABLED, false);
     }
 
-    @Override
-    public boolean onKeyUp(int keyCode, KeyEvent event) {
-        int scanCode = event.getScanCode();
-        if (scanCode != 0) {
-            nativeSendKey(1, scanCode);
-            return true;
-        }
-
-        // fallback: when scancode is 0, map via KeyCodeMapper
-        int evdev = KeyCodeMapper.getScanCode(keyCode);
-        if (evdev != -1) {
-            nativeSendKey(1, evdev);
-            return true;
-        }
-        return true;
-    }
-
+    // ==================== 鼠标/外设事件（原有逻辑） ====================
     private static final int CLASSIFICATION_TWO_FINGER_SWIPE = 3;
     private static final int CLASSIFICATION_MULTI_FINGER_SWIPE = 4;
     private static final int CLASSIFICATION_PINCH = 5;
 
     private int savedBS = 0;
-
     private static final int[][] BUTTON_MAP = {
-        {MotionEvent.BUTTON_PRIMARY,   0x110}, // BTN_LEFT
-        {MotionEvent.BUTTON_SECONDARY, 0x111}, // BTN_RIGHT
-        {MotionEvent.BUTTON_TERTIARY,  0x112}, // BTN_MIDDLE
-        {MotionEvent.BUTTON_BACK,      0x113}, // BTN_SIDE
-        {MotionEvent.BUTTON_FORWARD,   0x114}, // BTN_EXTRA
+            {MotionEvent.BUTTON_PRIMARY,   0x110},
+            {MotionEvent.BUTTON_SECONDARY, 0x111},
+            {MotionEvent.BUTTON_TERTIARY,  0x112},
+            {MotionEvent.BUTTON_BACK,      0x113},
+            {MotionEvent.BUTTON_FORWARD,   0x114},
     };
 
     private boolean isMouseEvent(MotionEvent event) {
@@ -817,23 +1017,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             return false;
         int toolType = event.getToolType(event.getActionIndex());
         return toolType == MotionEvent.TOOL_TYPE_MOUSE
-            || toolType == MotionEvent.TOOL_TYPE_FINGER;
+                || toolType == MotionEvent.TOOL_TYPE_FINGER;
     }
 
     private boolean handleMouseEvent(MotionEvent event) {
         float dx = 0f;
         float dy = 0f;
-        
-        // Масштабирование
-        float scaleX = (customScreenWidth > 0 && viewWidth > 0) ? 
-                   (float)customScreenWidth / viewWidth : 1.0f;
-        float scaleY = (customScreenHeight > 0 && viewHeight > 0) ? 
-                   (float)customScreenHeight / viewHeight : 1.0f;
-        
+
+        float scaleX = (customScreenWidth > 0 && viewWidth > 0) ?
+                (float)customScreenWidth / viewWidth : 1.0f;
+        float scaleY = (customScreenHeight > 0 && viewHeight > 0) ?
+                (float)customScreenHeight / viewHeight : 1.0f;
+
         if (event.getHistorySize() > 0) {
             int last = event.getHistorySize() - 1;
-            dx = (event.getX() - event.getHistoricalX(0, last))*scaleX;
-            dy = (event.getY() - event.getHistoricalY(0, last))*scaleY;
+            dx = (event.getX() - event.getHistoricalX(0, last)) * scaleX;
+            dy = (event.getY() - event.getHistoricalY(0, last)) * scaleY;
         }
         nativeSendMouseMotion(event.getX() * scaleX, event.getY() * scaleY, dx, dy);
 
@@ -860,56 +1059,30 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return true;
     }
 
-    private boolean handleTouchEvent(MotionEvent event) {
-        int action = event.getActionMasked();
-        int pointerIdx = event.getActionIndex();
-        int pointerId = event.getPointerId(pointerIdx);
-    
-        // Масштабирование
-        float scaleX = (customScreenWidth > 0 && viewWidth > 0) ? 
-                       (float)customScreenWidth / viewWidth : 1.0f;
-        float scaleY = (customScreenHeight > 0 && viewHeight > 0) ? 
-                       (float)customScreenHeight / viewHeight : 1.0f;
-    
-        switch (action) {
-            case MotionEvent.ACTION_DOWN:
-            case MotionEvent.ACTION_POINTER_DOWN:
-                nativeSendTouch(0, 
-                    event.getX(pointerIdx) * scaleX, 
-                    event.getY(pointerIdx) * scaleY, 
-                    pointerId);
-                nativeSendTouchFrame();
+    @Override
+    public boolean onGenericMotionEvent(MotionEvent event) {
+        if (isMouseEvent(event)) {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_HOVER_MOVE) {
+                float scaleX = (customScreenWidth > 0 && viewWidth > 0) ?
+                        (float)customScreenWidth / viewWidth : 1.0f;
+                float scaleY = (customScreenHeight > 0 && viewHeight > 0) ?
+                        (float)customScreenHeight / viewHeight : 1.0f;
+                nativeSendMouseMotion(event.getX() * scaleX, event.getY() * scaleY,
+                        event.getAxisValue(MotionEvent.AXIS_RELATIVE_X),
+                        event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y));
                 return true;
-            
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_POINTER_UP:
-                nativeSendTouch(1, 
-                    event.getX(pointerIdx) * scaleX, 
-                    event.getY(pointerIdx) * scaleY, 
-                    pointerId);
-                nativeSendTouchFrame();
+            }
+            if (action == MotionEvent.ACTION_SCROLL) {
+                float vScroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL);
+                float hScroll = event.getAxisValue(MotionEvent.AXIS_HSCROLL);
+                if (vScroll != 0)
+                    nativeSendMouseScroll(0, -vScroll * 10);
+                if (hScroll != 0)
+                    nativeSendMouseScroll(1, hScroll * 10);
                 return true;
-            
-            case MotionEvent.ACTION_MOVE:
-                for (int i = 0; i < event.getPointerCount(); i++) {
-                    nativeSendTouch(2, 
-                        event.getX(i) * scaleX, 
-                        event.getY(i) * scaleY, 
-                        event.getPointerId(i));
-                }
-                nativeSendTouchFrame();
-                return true;
-            
-            case MotionEvent.ACTION_CANCEL:
-                for (int i = 0; i < event.getPointerCount(); i++) {
-                    nativeSendTouch(1, 
-                        event.getX(i) * scaleX, 
-                        event.getY(i) * scaleY, 
-                        event.getPointerId(i));
-                }
-                nativeSendTouchFrame();
-                return true;
+            }
         }
-        return false;
+        return super.onGenericMotionEvent(event);
     }
 }

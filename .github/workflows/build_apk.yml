@@ -6,26 +6,50 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-      
-    - name: Build with Gradle
-      run: ./gradlew assembleDebug
-      working-directory: consumers/anland_v5/android_consumer
-      
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: app-debug
-        path: consumers/anland_v5/android_consumer/app/build/outputs/apk/debug/app-debug.apk
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper/dists
+          key: ${{ runner.os }}-gradle-${{ hashFiles('consumers/anland_v5/android_consumer/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Cache Android build cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/build-cache
+          key: ${{ runner.os }}-android-build-cache-${{ hashFiles('consumers/anland_v5/android_consumer/**/*.gradle', 'consumers/anland_v5/android_consumer/**/*.gradle.kts') }}
+          restore-keys: |
+            ${{ runner.os }}-android-build-cache-
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools build-tools;34.0.0 ndk;29.0.13113456 cmake;3.22.1
+          accept-android-sdk-licenses: true
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x consumers/anland_v5/android_consumer/gradlew
+
+      - name: Build Debug APK
+        working-directory: consumers/anland_v5/android_consumer
+        run: ./gradlew assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: consumers/anland_v5/android_consumer/app/build/outputs/apk/debug/*.apk
