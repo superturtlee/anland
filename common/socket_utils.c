@@ -10,6 +10,9 @@
 int send_fds(int sock, const void *data, size_t data_len,
              const int *fds, int fd_count)
 {
+    if (fd_count <= 0 || fd_count > 253)
+        return -1;
+
     struct iovec iov = {
         .iov_base = (void *)data,
         .iov_len  = data_len,
@@ -79,7 +82,7 @@ int connect_unix(const char *path)
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         close(fd);
