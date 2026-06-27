@@ -56,7 +56,7 @@ diff --git a/src/inputmethod.cpp b/src/inputmethod.cpp
  }
  
  InputMethod::InputMethod()
-@@ -566,6 +555,73 @@
+@@ -566,6 +555,76 @@
      waylandServer()->seat()->notifyKeyboardKey(keysymToKeycode(sym), state);
  }
  
@@ -98,39 +98,42 @@ diff --git a/src/inputmethod.cpp b/src/inputmethod.cpp
 +    return keymap.toLatin1();
 +}
 +
++static void sendKeySymWithTemporaryKeymap(xkb_keysym_t keySym)
++{
++    static const uint syntheticKeyCode = 247;
++    const QByteArray temporaryKeymap = keymapContentsForKeysym(syntheticKeyCode, keySym);
++    if (temporaryKeymap.isEmpty()) {
++        return;
++    }
++
++    auto keyboard = waylandServer()->seat()->keyboard();
++    if (!keyboard) {
++        return;
++    }
++
++    keyboard->setKeymap(temporaryKeymap);
++    waylandServer()->seat()->notifyKeyboardKey(syntheticKeyCode, KeyboardKeyState::Pressed);
++    waylandServer()->seat()->notifyKeyboardKey(syntheticKeyCode, KeyboardKeyState::Released);
++    keyboard->setKeymap(input()->keyboard()->xkb()->keymapContents());
++}
++
 +void InputMethod::forwardKeySym(int keySym)
 +{
 +    const std::optional<std::pair<int, int>> keyCode = input()->keyboard()->xkb()->keycodeFromKeysym(keySym);
-+    if (!keyCode) {
-+        static const uint unmappedKeyCode = 247;
-+        const QByteArray temporaryKeymap = keymapContentsForKeysym(unmappedKeyCode, keySym);
-+        if (temporaryKeymap.isEmpty()) {
-+            return;
-+        }
-+
-+        waylandServer()->seat()->keyboard()->setKeymap(temporaryKeymap);
-+        waylandServer()->seat()->notifyKeyboardKey(unmappedKeyCode, KeyboardKeyState::Pressed);
-+        waylandServer()->seat()->notifyKeyboardKey(unmappedKeyCode, KeyboardKeyState::Released);
-+        waylandServer()->seat()->keyboard()->setKeymap(input()->keyboard()->xkb()->keymapContents());
++    if (!keyCode || keyCode->second > 0) {
++        sendKeySymWithTemporaryKeymap(keySym);
 +        return;
 +    }
 +
 +    const quint32 key = keyCode->first;
-+    const bool needsShift = keyCode->second > 0;
-+    if (needsShift) {
-+        waylandServer()->seat()->notifyKeyboardKey(KEY_LEFTSHIFT, KeyboardKeyState::Pressed);
-+    }
 +    waylandServer()->seat()->notifyKeyboardKey(key, KeyboardKeyState::Pressed);
 +    waylandServer()->seat()->notifyKeyboardKey(key, KeyboardKeyState::Released);
-+    if (needsShift) {
-+        waylandServer()->seat()->notifyKeyboardKey(KEY_LEFTSHIFT, KeyboardKeyState::Released);
-+    }
 +}
 +
  void InputMethod::commitString(qint32 serial, const QString &text)
  {
      if (auto t1 = waylandServer()->seat()->textInputV1(); t1 && t1->isEnabled()) {
-@@ -587,28 +643,12 @@
+@@ -587,28 +646,12 @@
      } else {
          // The application has no way of communicating with the input method.
          // So instead, try to convert what we get from the input method into
