@@ -32,6 +32,7 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.util.DisplayMetrics;   // ADDED
 
 import java.nio.charset.StandardCharsets;
 
@@ -83,6 +84,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private String mAppliedLayoutJson = "";
 
     public static MainActivity sInstance;
+
+    // ADDED: VirtualKeyboardView instance
+    private VirtualKeyboardView virtualKeyboardView;
 
     // evdev keycodes (linux/input-event-codes.h) for the editing keys a soft
     // keyboard emits as key events rather than text.
@@ -303,6 +307,28 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             .getBoolean(KEY_KEYBOARD_FLOATING, false);
         buildExtraKeysBar();
 
+        // ADDED: Create VirtualKeyboardView (hidden initially)
+        virtualKeyboardView = new VirtualKeyboardView(this);
+        virtualKeyboardView.setVisibility(View.GONE);
+        virtualKeyboardView.setOnKeyEventListener(new VirtualKeyboardView.OnKeyEventListener() {
+            @Override
+            public void onKeyDown(int scanCode) {
+                nativeSendKey(0, scanCode);
+            }
+            @Override
+            public void onKeyUp(int scanCode) {
+                nativeSendKey(1, scanCode);
+            }
+        });
+        // Add to root with no gravity – we will position manually.
+        root.addView(virtualKeyboardView, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.NO_GRAVITY
+        ));
+        // Let the view measure itself first, then position it bottom-center.
+        virtualKeyboardView.post(() -> positionVirtualKeyboard());
+
         setContentView(root);
         surfaceView.getHolder().addCallback(this);
 
@@ -328,6 +354,26 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         updateScreenSize();
         mouseX = screenWidth / 2f;
         mouseY = screenHeight / 2f;
+    }
+
+    // ADDED: Helper to position virtual keyboard at bottom-center
+    private void positionVirtualKeyboard() {
+        if (virtualKeyboardView == null) return;
+        int w = virtualKeyboardView.getMeasuredWidth();
+        int h = virtualKeyboardView.getMeasuredHeight();
+        if (w <= 0 || h <= 0) {
+            virtualKeyboardView.post(this::positionVirtualKeyboard);
+            return;
+        }
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        float x = (dm.widthPixels - w) / 2f;
+        float y = dm.heightPixels - h - dpToPx(50); // 50dp margin from bottom
+        virtualKeyboardView.setX(x);
+        virtualKeyboardView.setY(y);
+    }
+
+    private int dpToPx(int dp) {
+        return (int) (dp * getResources().getDisplayMetrics().density);
     }
 
     private void setupFullscreen() {
@@ -801,7 +847,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             @Override public void text(String s) {
                 if (!s.isEmpty()) nativeSendTextInput(s.getBytes(StandardCharsets.UTF_8));
             }
-            @Override public void toggleKeyboard() { MainActivity.this.toggleKeyboard(); }
+            @Override public void toggleKeyboard() {
+                // CHANGED: Now toggles the floating virtual keyboard instead of system IME
+                if (virtualKeyboardView.getVisibility() == View.VISIBLE) {
+                    virtualKeyboardView.setVisibility(View.GONE);
+                } else {
+                    virtualKeyboardView.setVisibility(View.VISIBLE);
+                    virtualKeyboardView.bringToFront();
+                    // Re-position it (in case screen size changed)
+                    positionVirtualKeyboard();
+                    // Optionally hide system IME to avoid overlap
+                    InputMethodManager imm = getSystemService(InputMethodManager.class);
+                    if (imm != null && getCurrentFocus() != null) {
+                        imm.hideSoftInputFromWindow(getCurrentFocus().getWindowToken(), 0);
+                    }
+                }
+            }
             @Override public void openSettings() {
                 startActivity(new Intent(MainActivity.this, SettingsActivity.class));
             }
@@ -849,7 +910,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         hiddenInput.setEnabled(false);
     }
 
-    private void toggleKeyboard() {
+    // Original toggleKeyboard for system IME – kept for potential other uses
+    private void toggleSystemKeyboard() {
         if (imm == null) imm = getSystemService(InputMethodManager.class);
         if (imm == null) return;
         if (isImeVisible()) {
@@ -924,7 +986,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         int boundKeycode = prefs.getInt(KEY_BOUND_KEYCODE, -1);
         if (boundKeycode != -1 && keyCode == boundKeycode) {
-            toggleKeyboard();
+            toggleSystemKeyboard();   // Keep original bound key behavior (system IME)
             return true;
         }
 
