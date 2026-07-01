@@ -54,6 +54,7 @@ public class SettingsActivity extends Activity {
     private static final String KEY_BACK_OPENS_EXTRA_KEYS = "back_opens_extra_keys";
     private static final String KEY_EXTRA_KEYS_LAYOUT = "extra_keys_layout";
     private static final String KEY_KEYBOARD_FLOATING = "keyboard_floating";
+    private static final String KEY_SHOW_KEYBOARD_BUTTON = "show_keyboard_button";
     private static final String DEFAULT_SOCKET_PATH = "/data/local/tmp/display_daemon.sock";
     private static final int UNBOUND = -1;
 
@@ -406,6 +407,24 @@ public class SettingsActivity extends Activity {
         keyboardFloatingHint.setTextColor(Color.GRAY);
         keyboardFloatingHint.setPadding(0, dp(4), 0, dp(8));
         root.addView(keyboardFloatingHint);
+
+        // === Show keyboard button ===
+        Switch keyboardButtonSwitch = new Switch(this);
+        keyboardButtonSwitch.setText(R.string.keyboard_button_switch);
+        keyboardButtonSwitch.setTextSize(14);
+        keyboardButtonSwitch.setPadding(0, dp(16), 0, 0);
+        keyboardButtonSwitch.setChecked(prefs.getBoolean(KEY_SHOW_KEYBOARD_BUTTON, false));
+        keyboardButtonSwitch.setOnCheckedChangeListener((v, checked) ->
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                .putBoolean(KEY_SHOW_KEYBOARD_BUTTON, checked).apply());
+        root.addView(keyboardButtonSwitch);
+
+        TextView keyboardButtonHint = new TextView(this);
+        keyboardButtonHint.setText(R.string.keyboard_button_hint);
+        keyboardButtonHint.setTextSize(12);
+        keyboardButtonHint.setTextColor(Color.GRAY);
+        keyboardButtonHint.setPadding(0, dp(4), 0, dp(8));
+        root.addView(keyboardButtonHint);
     }
 
     private void buildCustomLayoutSection(LinearLayout root) {

@@ -74,6 +74,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     // shrinking it: the bar rides up with the keyboard but the surface keeps
     // its full size. See relayout() and buildExtraKeysBar().
     private static final String KEY_KEYBOARD_FLOATING = "keyboard_floating";
+    private static final String KEY_SHOW_KEYBOARD_BUTTON = "show_keyboard_button";
     private boolean mKeyboardFloating = false;
     private EditText hiddenInput;
     private InputMethodManager imm;
@@ -420,6 +421,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         keyboardFab.setOnClickListener(v -> toggleSystemKeyboard());
         keyboardFab.bringToFront();
         Log.i(TAG, "keyboardFab added at bottom-right, size=" + fabSize);
+
+        updateKeyboardFabVisibility();
+    }
+
+    private void updateKeyboardFabVisibility() {
+        if (keyboardFab == null) return;
+        boolean show = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .getBoolean(KEY_SHOW_KEYBOARD_BUTTON, false);
+        keyboardFab.setVisibility(show ? View.VISIBLE : View.GONE);
     }
 
     private void setupFullscreen() {
@@ -465,6 +475,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // ON the bar tracks the keyboard (hidden now if the IME isn't up); with it
         // OFF the master switch decides. See shouldShowBar.
         setExtraKeysBarVisible(shouldShowBar(isImeVisible()));
+        updateKeyboardFabVisibility();
         if (keyboardFab != null) keyboardFab.bringToFront();
 
         setupFullscreen();

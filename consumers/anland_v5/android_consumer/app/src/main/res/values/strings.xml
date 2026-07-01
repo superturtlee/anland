@@ -40,6 +40,8 @@
     <string name="back_opens_hint">When ON, pressing Back while the extra keys bar is hidden shows it; pressing Back again hides it. Use this to reach the extra keys without first opening the soft keyboard.</string>
     <string name="keyboard_floating_switch">Keyboard floating (overlay display)</string>
     <string name="keyboard_floating_hint">When ON, the soft keyboard and the extra keys bar float over the display area instead of shrinking it; the bar uses a translucent background and rises with the keyboard, but the display is not resized. When OFF, the original behaviour (display shrinks to make room) is kept. Takes effect on next return to the desktop.</string>
+    <string name="keyboard_button_switch">Show keyboard toggle button</string>
+    <string name="keyboard_button_hint">Show a floating ⌨ button on the desktop to open/close the soft keyboard.</string>
 
     <!-- Custom layout editor -->
     <string name="btn_load_default">Load default template</string>
