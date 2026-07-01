@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_short_label">设置</string>
+
+    <!-- Titles / section headers -->
+    <string name="settings_title">设置</string>
+    <string name="section_virtual_keyboard">虚拟键盘按键</string>
+    <string name="section_extra_keys">扩展按键栏</string>
+    <string name="section_custom_layout">自定义扩展按键布局</string>
+    <string name="section_touchpad">触摸板设置</string>
+    <string name="section_connection">连接</string>
+    <string name="section_resolution">显示分辨率</string>
+
+    <!-- Settings home: category rows and back navigation -->
+    <string name="nav_back">‹ 返回</string>
+    <string name="cat_keyboard_title">键盘与按键</string>
+    <string name="cat_keyboard_subtitle">按键绑定、无障碍与扩展按键栏</string>
+    <string name="cat_touchpad_title">触摸板与鼠标</string>
+    <string name="cat_touchpad_subtitle">触摸板模式与指针灵敏度</string>
+    <string name="cat_connection_subtitle">套接字、root、麦克风、摄像头与音频延迟</string>
+    <string name="cat_resolution_subtitle">输出分辨率与预设</string>
+
+    <!-- Bind key -->
+    <string name="bind_key_button">绑定虚拟键盘按键</string>
+    <string name="listening_countdown">正在监听…（%1$d 秒）</string>
+    <string name="status_current_none">当前：无</string>
+    <string name="status_current">当前：%1$s</string>
+    <string name="keycode_unknown">键码 %1$d</string>
+
+    <!-- Accessibility -->
+    <string name="accessibility_switch">无障碍按键拦截</string>
+    <string name="accessibility_hint">通过无障碍服务拦截功能键（Fn、F1-F12 等）。如果外接键盘的 Fn 组合键无法传到桌面，请启用此项。需要在系统 设置 &gt; 无障碍 中授予无障碍权限（仅需一次）。</string>
+
+    <!-- Extra keys bar -->
+    <string name="extra_keys_switch">扩展按键栏（特殊按键）</string>
+    <string name="extra_keys_hint">显示类似 Termux 的底部按键栏，包含 ESC/TAB/CTRL/ALT/方向键/PgUp 等。显示区域会缩小以腾出空间，按键栏会随软键盘一起升起。下次返回桌面视图时生效。</string>
+    <string name="auto_show_switch">随软键盘自动显示扩展按键</string>
+    <string name="auto_show_hint">开启时，扩展按键栏会随软键盘自动出现，并在软键盘关闭时隐藏。关闭时，按键栏会一直显示，直到在设置中手动切换。</string>
+    <string name="back_opens_switch">返回键打开扩展按键栏</string>
+    <string name="back_opens_hint">开启时，在扩展按键栏隐藏状态下按返回键会显示它，再次按返回键则隐藏。可用于无需先打开软键盘即可使用扩展按键。</string>
+    <string name="keyboard_floating_switch">键盘悬浮（覆盖显示区域）</string>
+    <string name="keyboard_floating_hint">开启时，软键盘和扩展按键栏会悬浮在显示区域之上，而不是缩小显示区域；按键栏使用半透明背景并随键盘升起，但显示区域不会被调整大小。关闭时保持原有行为（显示区域缩小以腾出空间）。下次返回桌面时生效。</string>
+
+    <!-- Custom layout editor -->
+    <string name="btn_load_default">加载默认模板</string>
+    <string name="btn_load_file">从文件加载…</string>
+    <string name="layout_hint">以 JSON 定义扩展按键栏：\"rows\" 是行的数组，每行又是按键的数组。每个按键都有 \"label\" 和 \"type\"（key/text/modifier/keyboard/vkeyboard/settings）。\"key\"/\"modifier\" 需要 evdev 的 \"code\"；\"text\" 需要 \"text\"；任意按键可添加 \"repeat\":true 或嵌套的 \"popup\"。无效的 JSON 会回退到默认布局。下次返回桌面时生效。</string>
+    <string name="layout_status_default">正在使用内置默认布局</string>
+    <string name="layout_status_valid">✓ 布局有效</string>
+    <string name="layout_status_invalid">✗ %1$s</string>
+
+    <!-- Touchpad -->
+    <string name="touchpad_mode_switch">触摸板模式（相对移动）</string>
+    <string name="touchpad_hint">开启：手指滑动移动鼠标光标（相对）。关闭：触摸直接映射到屏幕（绝对）。</string>
+    <string name="mouse_sensitivity_label">鼠标灵敏度（加速度）</string>
+    <string name="mouse_accel_value">%1$.1f 倍</string>
+
+    <!-- Connection -->
+    <string name="socket_path_label">守护进程套接字路径</string>
+    <string name="root_switch">使用 root 连接（辅助程序）</string>
+    <string name="root_hint">启动一个 root 辅助程序（su）连接到套接字，并将连接传回应用。下次连接时生效（请重新打开应用）。</string>
+    <string name="mic_switch">将麦克风转发到桌面</string>
+    <string name="mic_hint">桌面音频始终通过本设备的扬声器播放。启用此项还会把麦克风反向发送到桌面。下次连接时生效（请重新打开应用）。</string>
+    <string name="camera_switch">将摄像头转发到桌面</string>
+    <string name="camera_hint">允许桌面将本设备的摄像头作为视频源打开。仅在桌面正在录制时摄像头才会开启。下次返回应用时生效；首次使用会请求摄像头权限。</string>
+    <string name="audio_latency_title">音频延迟</string>
+    <string name="latency_speaker_label">扬声器（桌面 → 手机）</string>
+    <string name="latency_mic_label">麦克风（手机 → 桌面）</string>
+    <string name="latency_hint">更低的预设可降低延迟，但在设备繁忙时可能造成杂音/丢帧。返回桌面视图时生效。</string>
+
+    <!-- Resolution -->
+    <string name="width_hint">宽度（例如 1920）</string>
+    <string name="height_hint">高度（例如 1080）</string>
+    <string name="resolution_hint">选择预设或手动输入数值。填 0 表示原生分辨率。\"Screen ×\" 会按本设备面板（横向）缩放。下次连接时生效。</string>
+
+    <!-- Toasts -->
+    <string name="toast_no_picker">没有可用的文件选择器</string>
+    <string name="toast_read_failed">无法读取文件</string>
+
+    <!-- Hardware key names -->
+    <string name="key_volume_up">音量+</string>
+    <string name="key_volume_down">音量-</string>
+    <string name="key_volume_mute">静音</string>
+    <string name="key_power">电源</string>
+    <string name="key_camera">相机</string>
+    <string name="key_headset_hook">耳机线控</string>
+    <string name="key_media_play_pause">播放/暂停</string>
+    <string name="key_media_next">下一曲</string>
+    <string name="key_media_previous">上一曲</string>
+    <string name="key_brightness_up">亮度+</string>
+    <string name="key_brightness_down">亮度-</string>
+    <string name="key_home">主屏</string>
+    <string name="key_back">返回</string>
+
+    <!-- Audio latency presets -->
+    <string-array name="latency_labels">
+        <item>自动（引擎默认）</item>
+        <item>超低（约 1 毫秒）</item>
+        <item>低（约 3 毫秒）</item>
+        <item>均衡（约 5 毫秒）</item>
+        <item>安全（约 10 毫秒）</item>
+        <item>宽松（约 20 毫秒）</item>
+    </string-array>
+
+    <!-- Resolution presets -->
+    <string-array name="res_preset_labels">
+        <item>预设…</item>
+        <item>自动（0×0，原生）</item>
+        <item>4K (3840×2160)</item>
+        <item>2K (2560×1440)</item>
+        <item>1080p (1920×1080)</item>
+        <item>720p (1280×720)</item>
+        <item>480p (854×480)</item>
+        <item>屏幕 × 1.0</item>
+        <item>屏幕 × 0.8</item>
+        <item>屏幕 × 0.75</item>
+        <item>屏幕 × 0.5</item>
+        <item>屏幕 × 0.25</item>
+    </string-array>
+</resources>

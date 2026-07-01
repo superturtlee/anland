@@ -243,7 +243,7 @@ public class ExtraKeysBar extends GridLayout {
                 Key.rep("↑", EV_UP),
                 Key.rep("END", EV_END),
                 Key.rep("PGUP", EV_PAGEUP),
-                Key.settings(GLYPH_SETTINGS),
+                Key.kbd(GLYPH_KEYBOARD, Key.vkbd(GLYPH_VKEYBOARD)),
             },
             {
                 Key.key("TAB", EV_TAB),
@@ -253,7 +253,7 @@ public class ExtraKeysBar extends GridLayout {
                 Key.rep("↓", EV_DOWN),
                 Key.rep("→", EV_RIGHT),
                 Key.rep("PGDN", EV_PAGEDOWN),
-                Key.kbd(GLYPH_KEYBOARD, Key.vkbd(GLYPH_VKEYBOARD)),
+                Key.settings(GLYPH_SETTINGS),
             },
         };
     }

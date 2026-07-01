@@ -1,4 +1,120 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_short_label">Settings</string>
+
+    <!-- Titles / section headers -->
+    <string name="settings_title">Settings</string>
+    <string name="section_virtual_keyboard">Virtual Keyboard Key</string>
+    <string name="section_extra_keys">Extra Keys Bar</string>
+    <string name="section_custom_layout">Custom Extra Keys Layout</string>
+    <string name="section_touchpad">Touchpad Settings</string>
+    <string name="section_connection">Connection</string>
+    <string name="section_resolution">Display Resolution</string>
+
+    <!-- Settings home: category rows and back navigation -->
+    <string name="nav_back">‹ Back</string>
+    <string name="cat_keyboard_title">Keyboard &amp; Keys</string>
+    <string name="cat_keyboard_subtitle">Key binding, accessibility &amp; extra keys bar</string>
+    <string name="cat_touchpad_title">Touchpad &amp; Mouse</string>
+    <string name="cat_touchpad_subtitle">Touchpad mode &amp; pointer sensitivity</string>
+    <string name="cat_connection_subtitle">Socket, root, mic, camera &amp; audio latency</string>
+    <string name="cat_resolution_subtitle">Output resolution &amp; presets</string>
+
+    <!-- Bind key -->
+    <string name="bind_key_button">Bind Virtual Keyboard Key</string>
+    <string name="listening_countdown">Listening… (%1$ds)</string>
+    <string name="status_current_none">Current: None</string>
+    <string name="status_current">Current: %1$s</string>
+    <string name="keycode_unknown">Keycode %1$d</string>
+
+    <!-- Accessibility -->
+    <string name="accessibility_switch">Accessibility Key Interception</string>
+    <string name="accessibility_hint">Intercept function keys (Fn, F1-F12 etc.) via AccessibilityService. Enable this if external keyboard Fn combos don\'t reach the desktop. Requires Accessibility permission granted in system Settings &gt; Accessibility (one-time).</string>
+
+    <!-- Extra keys bar -->
+    <string name="extra_keys_switch">Extra Keys Bar (special keys)</string>
+    <string name="extra_keys_hint">Show a Termux-style bottom bar with ESC/TAB/CTRL/ALT/arrows/PgUp etc. The display area shrinks to make room; the bar rises together with the soft keyboard. Takes effect on next return to the desktop view.</string>
+    <string name="auto_show_switch">Auto-show extra keys with keyboard</string>
+    <string name="auto_show_hint">When ON, extra keys bar appears automatically with the soft keyboard and hides when it closes. When OFF, bar stays visible until manually toggled via settings.</string>
+    <string name="back_opens_switch">Back key opens extra keys bar</string>
+    <string name="back_opens_hint">When ON, pressing Back while the extra keys bar is hidden shows it; pressing Back again hides it. Use this to reach the extra keys without first opening the soft keyboard.</string>
+    <string name="keyboard_floating_switch">Keyboard floating (overlay display)</string>
+    <string name="keyboard_floating_hint">When ON, the soft keyboard and the extra keys bar float over the display area instead of shrinking it; the bar uses a translucent background and rises with the keyboard, but the display is not resized. When OFF, the original behaviour (display shrinks to make room) is kept. Takes effect on next return to the desktop.</string>
+
+    <!-- Custom layout editor -->
+    <string name="btn_load_default">Load default template</string>
+    <string name="btn_load_file">Load from file…</string>
+    <string name="layout_hint">Define the extra-keys bar as JSON: \"rows\" is an array of rows, each an array of keys. A key has a \"label\" and a \"type\" (key/text/modifier/keyboard/vkeyboard/settings). \"key\"/\"modifier\" take an evdev \"code\"; \"text\" takes \"text\"; any key may add \"repeat\":true or a nested \"popup\". Invalid JSON falls back to the default. Takes effect on next return to the desktop.</string>
+    <string name="layout_status_default">Using built-in default layout</string>
+    <string name="layout_status_valid">✓ Valid layout</string>
+    <string name="layout_status_invalid">✗ %1$s</string>
+
+    <!-- Touchpad -->
+    <string name="touchpad_mode_switch">Touchpad Mode (relative movement)</string>
+    <string name="touchpad_hint">ON: finger slides move mouse cursor (relative). OFF: touch maps directly to screen (absolute).</string>
+    <string name="mouse_sensitivity_label">Mouse Sensitivity (Acceleration)</string>
+    <string name="mouse_accel_value">%1$.1fx</string>
+
+    <!-- Connection -->
+    <string name="socket_path_label">Daemon socket path</string>
+    <string name="root_switch">Connect with root (helper)</string>
+    <string name="root_hint">Launches a root helper (su) that connects to the socket and passes the connection back to the app. Takes effect on next connect (reopen the app).</string>
+    <string name="mic_switch">Forward microphone to desktop</string>
+    <string name="mic_hint">Desktop audio always plays through this device\'s speaker. Enabling this also sends the mic the other way. Takes effect on next connect (reopen the app).</string>
+    <string name="camera_switch">Forward camera to desktop</string>
+    <string name="camera_hint">Lets the desktop open this device\'s camera(s) as a video source. The camera only turns on while the desktop is actively recording. Takes effect on next return to the app; first use prompts for the camera permission.</string>
+    <string name="audio_latency_title">Audio latency</string>
+    <string name="latency_speaker_label">Speaker (desktop → phone)</string>
+    <string name="latency_mic_label">Microphone (phone → desktop)</string>
+    <string name="latency_hint">Lower presets cut latency but can cause crackles/dropouts on a busy device. Applies when you return to the desktop view.</string>
+
+    <!-- Resolution -->
+    <string name="width_hint">Width (e.g. 1920)</string>
+    <string name="height_hint">Height (e.g. 1080)</string>
+    <string name="resolution_hint">Pick a preset or enter values manually. Leave 0 for native resolution. \"Screen ×\" scales this device\'s panel (landscape). Takes effect on next connect.</string>
+
+    <!-- Toasts -->
+    <string name="toast_no_picker">No file picker available</string>
+    <string name="toast_read_failed">Could not read file</string>
+
+    <!-- Hardware key names -->
+    <string name="key_volume_up">Volume Up</string>
+    <string name="key_volume_down">Volume Down</string>
+    <string name="key_volume_mute">Volume Mute</string>
+    <string name="key_power">Power</string>
+    <string name="key_camera">Camera</string>
+    <string name="key_headset_hook">Headset Hook</string>
+    <string name="key_media_play_pause">Media Play/Pause</string>
+    <string name="key_media_next">Media Next</string>
+    <string name="key_media_previous">Media Previous</string>
+    <string name="key_brightness_up">Brightness Up</string>
+    <string name="key_brightness_down">Brightness Down</string>
+    <string name="key_home">Home</string>
+    <string name="key_back">Back</string>
+
+    <!-- Audio latency presets -->
+    <string-array name="latency_labels">
+        <item>Auto (engine default)</item>
+        <item>Ultra Low (~1 ms)</item>
+        <item>Low (~3 ms)</item>
+        <item>Balanced (~5 ms)</item>
+        <item>Safe (~10 ms)</item>
+        <item>Relaxed (~20 ms)</item>
+    </string-array>
+
+    <!-- Resolution presets -->
+    <string-array name="res_preset_labels">
+        <item>Preset…</item>
+        <item>Auto (0×0, native)</item>
+        <item>4K (3840×2160)</item>
+        <item>2K (2560×1440)</item>
+        <item>1080p (1920×1080)</item>
+        <item>720p (1280×720)</item>
+        <item>480p (854×480)</item>
+        <item>Screen × 1.0</item>
+        <item>Screen × 0.8</item>
+        <item>Screen × 0.75</item>
+        <item>Screen × 0.5</item>
+        <item>Screen × 0.25</item>
+    </string-array>
 </resources>

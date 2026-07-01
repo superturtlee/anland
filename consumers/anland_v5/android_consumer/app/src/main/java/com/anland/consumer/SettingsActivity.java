@@ -14,7 +14,8 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.text.InputType;
 import android.util.Log;
-import android.util.SparseArray;
+import android.util.SparseIntArray;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -60,24 +61,13 @@ public class SettingsActivity extends Activity {
     private static final String KEY_TOUCHPAD_MODE = "touchpad_mode";
     private static final String KEY_MOUSE_ACCEL = "mouse_speed";
 
-    // Latency presets: label shown in the spinner -> target buffer in ms (0 = auto).
+    // Latency presets: target buffer in ms (0 = auto). The user-visible labels live
+    // in the R.array.latency_labels string-array, parallel to this array.
     private static final int[] LATENCY_MS = {0, 1, 3, 5, 10, 20};
-    private static final String[] LATENCY_LABELS = {
-        "Auto (engine default)", "Ultra Low (~1 ms)", "Low (~3 ms)",
-        "Balanced (~5 ms)", "Safe (~10 ms)", "Relaxed (~20 ms)"
-    };
 
-    // Resolution presets. Index 0 is a no-op placeholder; fixed presets carry
-    // explicit dimensions, "Screen ×f" entries are computed from the panel size
-    // at selection time (see resolvePreset / scaleScreen).
-    private static final String[] RES_PRESET_LABELS = {
-        "Preset…",
-        "Auto (0×0, native)",
-        "4K (3840×2160)", "2K (2560×1440)", "1080p (1920×1080)",
-        "720p (1280×720)", "480p (854×480)",
-        "Screen × 1.0", "Screen × 0.8", "Screen × 0.75",
-        "Screen × 0.5", "Screen × 0.25"
-    };
+    // Which secondary page is on screen. Back returns HOME -> exits the activity.
+    private enum Page { HOME, KEYBOARD, TOUCHPAD, CONNECTION, RESOLUTION }
+    private Page currentPage = Page.HOME;
 
     private Button bindButton;
     private TextView statusText;
@@ -88,46 +78,209 @@ public class SettingsActivity extends Activity {
     private EditText layoutInput;
     private static final int REQ_PICK_LAYOUT = 2001;
 
-    // Android keycode → human-readable name
-    private static final SparseArray<String> KEY_NAMES = new SparseArray<>();
+    // Android keycode → localized name string resource
+    private static final SparseIntArray KEY_NAME_RES = new SparseIntArray();
     static {
-        KEY_NAMES.put(KeyEvent.KEYCODE_VOLUME_UP, "Volume Up");
-        KEY_NAMES.put(KeyEvent.KEYCODE_VOLUME_DOWN, "Volume Down");
-        KEY_NAMES.put(KeyEvent.KEYCODE_VOLUME_MUTE, "Volume Mute");
-        KEY_NAMES.put(KeyEvent.KEYCODE_POWER, "Power");
-        KEY_NAMES.put(KeyEvent.KEYCODE_CAMERA, "Camera");
-        KEY_NAMES.put(KeyEvent.KEYCODE_HEADSETHOOK, "Headset Hook");
-        KEY_NAMES.put(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, "Media Play/Pause");
-        KEY_NAMES.put(KeyEvent.KEYCODE_MEDIA_NEXT, "Media Next");
-        KEY_NAMES.put(KeyEvent.KEYCODE_MEDIA_PREVIOUS, "Media Previous");
-        KEY_NAMES.put(KeyEvent.KEYCODE_BRIGHTNESS_UP, "Brightness Up");
-        KEY_NAMES.put(KeyEvent.KEYCODE_BRIGHTNESS_DOWN, "Brightness Down");
-        KEY_NAMES.put(KeyEvent.KEYCODE_HOME, "Home");
-        KEY_NAMES.put(KeyEvent.KEYCODE_BACK, "Back");
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_VOLUME_UP, R.string.key_volume_up);
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_VOLUME_DOWN, R.string.key_volume_down);
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_VOLUME_MUTE, R.string.key_volume_mute);
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_POWER, R.string.key_power);
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_CAMERA, R.string.key_camera);
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_HEADSETHOOK, R.string.key_headset_hook);
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, R.string.key_media_play_pause);
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_MEDIA_NEXT, R.string.key_media_next);
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_MEDIA_PREVIOUS, R.string.key_media_previous);
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_BRIGHTNESS_UP, R.string.key_brightness_up);
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_BRIGHTNESS_DOWN, R.string.key_brightness_down);
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_HOME, R.string.key_home);
+        KEY_NAME_RES.put(KeyEvent.KEYCODE_BACK, R.string.key_back);
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        showHome();
+    }
 
+    // ============================================================
+    // Navigation: a home list of categories, each opening a page.
+    // Every page is a fresh LinearLayout wrapped by setContent().
+    // ============================================================
+
+    // Wrap `content` in the standard white ScrollView, apply edge-to-edge insets,
+    // and install it. Reused by the home list and every secondary page.
+    private void setContent(final LinearLayout content) {
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(Color.WHITE);
-        
-        final LinearLayout root = new LinearLayout(this);
+        scroll.addView(content);
+        setContentView(scroll);
+
+        // Edge-to-edge is enforced on Android 15+ (targetSdk 36): the system no
+        // longer auto-resizes the window for the IME, so a manifest "adjustResize"
+        // is ignored and the soft keyboard overlaps the bottom EditTexts. Take over
+        // inset handling and pad the scrollable content by the system-bar + IME
+        // insets ourselves, so the ScrollView can scroll the focused field above
+        // the keyboard. Base padding (dp(24)) is preserved on all edges.
+        getWindow().setDecorFitsSystemWindows(false);
+        final int base = dp(24);
+        content.setOnApplyWindowInsetsListener((v, insets) -> {
+            Insets in = insets.getInsets(
+                WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
+            v.setPadding(base + in.left, base + in.top,
+                         base + in.right, base + in.bottom);
+            return insets;
+        });
+    }
+
+    private void showHome() {
+        currentPage = Page.HOME;
+
+        LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
 
-        // Title
         TextView title = new TextView(this);
-        title.setText("Settings");
+        title.setText(R.string.settings_title);
         title.setTextSize(24);
         title.setTypeface(null, Typeface.BOLD);
         title.setGravity(Gravity.START);
-        title.setPadding(0, 0, 0, dp(32));
+        title.setPadding(0, 0, 0, dp(24));
         root.addView(title);
 
-        // Bind key section
+        addCategoryRow(root, R.string.cat_keyboard_title,
+            R.string.cat_keyboard_subtitle, this::showKeyboardPage);
+        addCategoryRow(root, R.string.cat_touchpad_title,
+            R.string.cat_touchpad_subtitle, this::showTouchpadPage);
+        addCategoryRow(root, R.string.section_connection,
+            R.string.cat_connection_subtitle, this::showConnectionPage);
+        addCategoryRow(root, R.string.section_resolution,
+            R.string.cat_resolution_subtitle, this::showResolutionPage);
+
+        setContent(root);
+    }
+
+    // A tappable "title / subtitle ›" row plus a hairline divider.
+    private void addCategoryRow(LinearLayout parent, int titleRes, int subtitleRes,
+                                final Runnable onClick) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(16), 0, dp(16));
+        row.setClickable(true);
+        TypedValue tv = new TypedValue();
+        if (getTheme().resolveAttribute(
+                android.R.attr.selectableItemBackground, tv, true)) {
+            row.setBackgroundResource(tv.resourceId);
+        }
+        row.setOnClickListener(v -> onClick.run());
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.setLayoutParams(new LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView t = new TextView(this);
+        t.setText(titleRes);
+        t.setTextSize(18);
+        t.setTextColor(Color.BLACK);
+        texts.addView(t);
+
+        TextView s = new TextView(this);
+        s.setText(subtitleRes);
+        s.setTextSize(13);
+        s.setTextColor(Color.GRAY);
+        s.setPadding(0, dp(2), 0, 0);
+        texts.addView(s);
+
+        row.addView(texts);
+
+        TextView chevron = new TextView(this);
+        chevron.setText("›");
+        chevron.setTextSize(22);
+        chevron.setTextColor(Color.GRAY);
+        row.addView(chevron);
+
+        parent.addView(row);
+
+        View divider = new View(this);
+        divider.setLayoutParams(new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, dp(1))));
+        divider.setBackgroundColor(0xFFE0E0E0);
+        parent.addView(divider);
+    }
+
+    // A fresh page root with a back link and a bold page title.
+    private LinearLayout newPage(int titleRes) {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+
+        TextView back = new TextView(this);
+        back.setText(R.string.nav_back);
+        back.setTextSize(16);
+        back.setTextColor(0xFF1565C0);
+        back.setPadding(0, 0, 0, dp(12));
+        back.setClickable(true);
+        back.setOnClickListener(v -> showHome());
+        root.addView(back);
+
+        TextView title = new TextView(this);
+        title.setText(titleRes);
+        title.setTextSize(24);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setGravity(Gravity.START);
+        title.setPadding(0, 0, 0, dp(24));
+        root.addView(title);
+
+        return root;
+    }
+
+    private void showKeyboardPage() {
+        currentPage = Page.KEYBOARD;
+        LinearLayout root = newPage(R.string.cat_keyboard_title);
+        buildVirtualKeyboardSection(root);
+        buildAccessibilitySection(root);
+        buildExtraKeysSection(root);
+        buildCustomLayoutSection(root);
+        setContent(root);
+        updateStatus();
+    }
+
+    private void showTouchpadPage() {
+        currentPage = Page.TOUCHPAD;
+        LinearLayout root = newPage(R.string.cat_touchpad_title);
+        buildTouchpadSection(root);
+        setContent(root);
+    }
+
+    private void showConnectionPage() {
+        currentPage = Page.CONNECTION;
+        LinearLayout root = newPage(R.string.section_connection);
+        addConnectionSection(root);
+        setContent(root);
+    }
+
+    private void showResolutionPage() {
+        currentPage = Page.RESOLUTION;
+        LinearLayout root = newPage(R.string.section_resolution);
+        addResolutionSection(root);
+        setContent(root);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (currentPage != Page.HOME) {
+            showHome();
+        } else {
+            super.onBackPressed();
+        }
+    }
+
+    // ============================================================
+    // Keyboard & Keys page sections
+    // ============================================================
+
+    private void buildVirtualKeyboardSection(LinearLayout root) {
         TextView bindLabel = new TextView(this);
-        bindLabel.setText("Virtual Keyboard Key");
+        bindLabel.setText(R.string.section_virtual_keyboard);
         bindLabel.setTextSize(16);
         bindLabel.setTypeface(null, Typeface.BOLD);
         bindLabel.setPadding(0, 0, 0, dp(8));
@@ -140,14 +293,16 @@ public class SettingsActivity extends Activity {
         root.addView(statusText);
 
         bindButton = new Button(this);
-        bindButton.setText("Bind Virtual Keyboard Key");
+        bindButton.setText(R.string.bind_key_button);
         bindButton.setOnClickListener(v -> startListening());
         root.addView(bindButton);
+    }
 
-        // === Accessibility key intercept switch ===
+    private void buildAccessibilitySection(LinearLayout root) {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
         Switch accessibilitySwitch = new Switch(this);
-        accessibilitySwitch.setText("Accessibility Key Interception");
+        accessibilitySwitch.setText(R.string.accessibility_switch);
         accessibilitySwitch.setTextSize(14);
         accessibilitySwitch.setPadding(0, dp(16), 0, 0);
         accessibilitySwitch.setChecked(prefs.getBoolean(KEY_ACCESSIBILITY_ENABLED, false));
@@ -163,20 +318,28 @@ public class SettingsActivity extends Activity {
         root.addView(accessibilitySwitch);
 
         TextView accessibilityHint = new TextView(this);
-        accessibilityHint.setText("Intercept function keys (Fn, F1-F12 etc.) via "
-            + "AccessibilityService. Enable this if external keyboard Fn combos "
-            + "don't reach the desktop. Requires Accessibility permission granted "
-            + "in system Settings > Accessibility (one-time).");
+        accessibilityHint.setText(R.string.accessibility_hint);
         accessibilityHint.setTextSize(12);
         accessibilityHint.setTextColor(Color.GRAY);
         accessibilityHint.setPadding(0, dp(4), 0, dp(8));
         root.addView(accessibilityHint);
+    }
+
+    private void buildExtraKeysSection(LinearLayout root) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+        TextView header = new TextView(this);
+        header.setText(R.string.section_extra_keys);
+        header.setTextSize(16);
+        header.setTypeface(null, Typeface.BOLD);
+        header.setPadding(0, dp(24), 0, dp(8));
+        root.addView(header);
 
         // === Extra-keys bar switch ===
         Switch extraKeysSwitch = new Switch(this);
-        extraKeysSwitch.setText("Extra Keys Bar (special keys)");
+        extraKeysSwitch.setText(R.string.extra_keys_switch);
         extraKeysSwitch.setTextSize(14);
-        extraKeysSwitch.setPadding(0, dp(16), 0, 0);
+        extraKeysSwitch.setPadding(0, dp(8), 0, 0);
         extraKeysSwitch.setChecked(prefs.getBoolean(KEY_EXTRA_KEYS_ENABLED, false));
         extraKeysSwitch.setOnCheckedChangeListener((v, checked) ->
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
@@ -184,10 +347,7 @@ public class SettingsActivity extends Activity {
         root.addView(extraKeysSwitch);
 
         TextView extraKeysHint = new TextView(this);
-        extraKeysHint.setText("Show a Termux-style bottom bar with ESC/TAB/CTRL/ALT/"
-            + "arrows/PgUp etc. The display area shrinks to make room; the bar rises "
-            + "together with the soft keyboard. Takes effect on next return to the "
-            + "desktop view.");
+        extraKeysHint.setText(R.string.extra_keys_hint);
         extraKeysHint.setTextSize(12);
         extraKeysHint.setTextColor(Color.GRAY);
         extraKeysHint.setPadding(0, dp(4), 0, dp(8));
@@ -195,7 +355,7 @@ public class SettingsActivity extends Activity {
 
         // === Auto-show extra keys with keyboard ===
         Switch autoShowSwitch = new Switch(this);
-        autoShowSwitch.setText("Auto-show extra keys with keyboard");
+        autoShowSwitch.setText(R.string.auto_show_switch);
         autoShowSwitch.setTextSize(14);
         autoShowSwitch.setPadding(0, dp(16), 0, 0);
         autoShowSwitch.setChecked(prefs.getBoolean(KEY_AUTO_SHOW_EXTRA_KEYS, true));
@@ -205,9 +365,7 @@ public class SettingsActivity extends Activity {
         root.addView(autoShowSwitch);
 
         TextView autoShowHint = new TextView(this);
-        autoShowHint.setText("When ON, extra keys bar appears automatically with the soft "
-        + "keyboard and hides when it closes. When OFF, bar stays visible until "
-        + "manually toggled via settings.");
+        autoShowHint.setText(R.string.auto_show_hint);
         autoShowHint.setTextSize(12);
         autoShowHint.setTextColor(Color.GRAY);
         autoShowHint.setPadding(0, dp(4), 0, dp(8));
@@ -215,19 +373,17 @@ public class SettingsActivity extends Activity {
 
         // === Back key opens extra keys bar ===
         Switch backOpensExtraKeysSwitch = new Switch(this);
-        backOpensExtraKeysSwitch.setText("Back key opens extra keys bar");
+        backOpensExtraKeysSwitch.setText(R.string.back_opens_switch);
         backOpensExtraKeysSwitch.setTextSize(14);
         backOpensExtraKeysSwitch.setPadding(0, dp(16), 0, 0);
-        backOpensExtraKeysSwitch.setChecked(prefs.getBoolean(KEY_BACK_OPENS_EXTRA_KEYS, false));
+        backOpensExtraKeysSwitch.setChecked(prefs.getBoolean(KEY_BACK_OPENS_EXTRA_KEYS, true));
         backOpensExtraKeysSwitch.setOnCheckedChangeListener((v, checked) ->
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
                 .putBoolean(KEY_BACK_OPENS_EXTRA_KEYS, checked).apply());
         root.addView(backOpensExtraKeysSwitch);
 
         TextView backOpensExtraKeysHint = new TextView(this);
-        backOpensExtraKeysHint.setText("When ON, pressing Back while the extra keys bar "
-            + "is hidden shows it; pressing Back again hides it. Use this to reach the "
-            + "extra keys without first opening the soft keyboard.");
+        backOpensExtraKeysHint.setText(R.string.back_opens_hint);
         backOpensExtraKeysHint.setTextSize(12);
         backOpensExtraKeysHint.setTextColor(Color.GRAY);
         backOpensExtraKeysHint.setPadding(0, dp(4), 0, dp(8));
@@ -235,29 +391,28 @@ public class SettingsActivity extends Activity {
 
         // === Keyboard floating ===
         Switch keyboardFloatingSwitch = new Switch(this);
-        keyboardFloatingSwitch.setText("Keyboard floating (overlay display)");
+        keyboardFloatingSwitch.setText(R.string.keyboard_floating_switch);
         keyboardFloatingSwitch.setTextSize(14);
         keyboardFloatingSwitch.setPadding(0, dp(16), 0, 0);
-        keyboardFloatingSwitch.setChecked(prefs.getBoolean(KEY_KEYBOARD_FLOATING, false));
+        keyboardFloatingSwitch.setChecked(prefs.getBoolean(KEY_KEYBOARD_FLOATING, true));
         keyboardFloatingSwitch.setOnCheckedChangeListener((v, checked) ->
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
                 .putBoolean(KEY_KEYBOARD_FLOATING, checked).apply());
         root.addView(keyboardFloatingSwitch);
 
         TextView keyboardFloatingHint = new TextView(this);
-        keyboardFloatingHint.setText("When ON, the soft keyboard and the extra keys bar "
-            + "float over the display area instead of shrinking it; the bar uses a "
-            + "translucent background and rises with the keyboard, but the display is "
-            + "not resized. When OFF, the original behaviour (display shrinks to make "
-            + "room) is kept. Takes effect on next return to the desktop.");
+        keyboardFloatingHint.setText(R.string.keyboard_floating_hint);
         keyboardFloatingHint.setTextSize(12);
         keyboardFloatingHint.setTextColor(Color.GRAY);
         keyboardFloatingHint.setPadding(0, dp(4), 0, dp(8));
         root.addView(keyboardFloatingHint);
+    }
 
-        // === Custom extra-keys layout (JSON) ===
+    private void buildCustomLayoutSection(LinearLayout root) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
         TextView layoutHeader = new TextView(this);
-        layoutHeader.setText("Custom Extra Keys Layout");
+        layoutHeader.setText(R.string.section_custom_layout);
         layoutHeader.setTextSize(16);
         layoutHeader.setTypeface(null, Typeface.BOLD);
         layoutHeader.setPadding(0, dp(24), 0, dp(8));
@@ -297,43 +452,35 @@ public class SettingsActivity extends Activity {
         layoutButtons.setOrientation(LinearLayout.HORIZONTAL);
 
         Button loadDefaultBtn = new Button(this);
-        loadDefaultBtn.setText("Load default template");
+        loadDefaultBtn.setText(R.string.btn_load_default);
         loadDefaultBtn.setOnClickListener(v ->
             layoutInput.setText(ExtraKeysBar.defaultLayoutJson()));
         layoutButtons.addView(loadDefaultBtn);
 
         Button loadFileBtn = new Button(this);
-        loadFileBtn.setText("Load from file…");
+        loadFileBtn.setText(R.string.btn_load_file);
         loadFileBtn.setOnClickListener(v -> pickLayoutFile());
         layoutButtons.addView(loadFileBtn);
 
         root.addView(layoutButtons);
 
         TextView layoutHint = new TextView(this);
-        layoutHint.setText("Define the extra-keys bar as JSON: \"rows\" is an array of "
-            + "rows, each an array of keys. A key has a \"label\" and a \"type\" "
-            + "(key/text/modifier/keyboard/vkeyboard/settings). \"key\"/\"modifier\" take an evdev "
-            + "\"code\"; \"text\" takes \"text\"; any key may add \"repeat\":true or a "
-            + "nested \"popup\". Invalid JSON falls back to the default. Takes effect on "
-            + "next return to the desktop.");
+        layoutHint.setText(R.string.layout_hint);
         layoutHint.setTextSize(12);
         layoutHint.setTextColor(Color.GRAY);
         layoutHint.setPadding(0, dp(4), 0, dp(8));
         root.addView(layoutHint);
+    }
 
-        // ============================================================
-        // ===== 新增：触摸板设置区域 =====
-        // ============================================================
-        TextView touchpadHeader = new TextView(this);
-        touchpadHeader.setText("Touchpad Settings");
-        touchpadHeader.setTextSize(16);
-        touchpadHeader.setTypeface(null, Typeface.BOLD);
-        touchpadHeader.setPadding(0, dp(32), 0, dp(8));
-        root.addView(touchpadHeader);
+    // ============================================================
+    // ===== 触摸板设置区域 =====
+    // ============================================================
+    private void buildTouchpadSection(LinearLayout root) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
         // 触摸板模式开关
         Switch touchpadModeSwitch = new Switch(this);
-        touchpadModeSwitch.setText("Touchpad Mode (relative movement)");
+        touchpadModeSwitch.setText(R.string.touchpad_mode_switch);
         touchpadModeSwitch.setTextSize(14);
         touchpadModeSwitch.setPadding(0, dp(8), 0, 0);
         touchpadModeSwitch.setChecked(prefs.getBoolean(KEY_TOUCHPAD_MODE, false));
@@ -343,19 +490,19 @@ public class SettingsActivity extends Activity {
         root.addView(touchpadModeSwitch);
 
         TextView touchpadHint = new TextView(this);
-        touchpadHint.setText("ON: finger slides move mouse cursor (relative). OFF: touch maps directly to screen (absolute).");
+        touchpadHint.setText(R.string.touchpad_hint);
         touchpadHint.setTextSize(12);
         touchpadHint.setTextColor(Color.GRAY);
         touchpadHint.setPadding(0, dp(4), 0, dp(12));
         root.addView(touchpadHint);
 
-        // 鼠标加速度（灵敏度）—— 范围扩大到 0.5 ~ 10.0
+        // 鼠标加速度（灵敏度）—— 范围 0.5 ~ 10.0
         LinearLayout accelLayout = new LinearLayout(this);
         accelLayout.setOrientation(LinearLayout.VERTICAL);
         accelLayout.setPadding(0, dp(8), 0, dp(16));
 
         TextView accelLabel = new TextView(this);
-        accelLabel.setText("Mouse Sensitivity (Acceleration)");
+        accelLabel.setText(R.string.mouse_sensitivity_label);
         accelLabel.setTextSize(14);
         accelLayout.addView(accelLabel);
 
@@ -369,12 +516,12 @@ public class SettingsActivity extends Activity {
         float curAccel = prefs.getFloat(KEY_MOUSE_ACCEL, 1.0f);
         curAccel = Math.max(0.5f, Math.min(10.0f, curAccel));
         accelSeek.setProgress((int)((curAccel - 0.5f) / 0.05f));
-        accelValue.setText(String.format("%.1fx", curAccel));
+        accelValue.setText(getString(R.string.mouse_accel_value, curAccel));
         accelSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 float val = 0.5f + progress * 0.05f;
-                accelValue.setText(String.format("%.1fx", val));
+                accelValue.setText(getString(R.string.mouse_accel_value, val));
                 getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
                         .putFloat(KEY_MOUSE_ACCEL, val).apply();
             }
@@ -383,31 +530,6 @@ public class SettingsActivity extends Activity {
         });
         accelLayout.addView(accelSeek);
         root.addView(accelLayout);
-
-        addConnectionSection(root);
-
-        addResolutionSection(root);
-
-        scroll.addView(root);
-        setContentView(scroll);
-
-        // Edge-to-edge is enforced on Android 15+ (targetSdk 36): the system no
-        // longer auto-resizes the window for the IME, so a manifest "adjustResize"
-        // is ignored and the soft keyboard overlaps the bottom EditTexts. Take over
-        // inset handling and pad the scrollable content by the system-bar + IME
-        // insets ourselves, so the ScrollView can scroll the focused field above
-        // the keyboard. Base padding (dp(24)) is preserved on all edges.
-        getWindow().setDecorFitsSystemWindows(false);
-        final int base = dp(24);
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
-            Insets in = insets.getInsets(
-                WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
-            v.setPadding(base + in.left, base + in.top,
-                         base + in.right, base + in.bottom);
-            return insets;
-        });
-
-        updateStatus();
     }
 
     // Connection settings: a custom daemon socket path and a "connect with root"
@@ -416,16 +538,9 @@ public class SettingsActivity extends Activity {
     private void addConnectionSection(LinearLayout root) {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
-        TextView header = new TextView(this);
-        header.setText("Connection");
-        header.setTextSize(16);
-        header.setTypeface(null, Typeface.BOLD);
-        header.setPadding(0, dp(32), 0, dp(8));
-        root.addView(header);
-
         // Socket path
         TextView sockLabel = new TextView(this);
-        sockLabel.setText("Daemon socket path");
+        sockLabel.setText(R.string.socket_path_label);
         sockLabel.setTextSize(14);
         sockLabel.setTextColor(Color.GRAY);
         sockLabel.setPadding(0, 0, 0, dp(4));
@@ -447,19 +562,17 @@ public class SettingsActivity extends Activity {
 
         // Connect with root
         Switch rootSwitch = new Switch(this);
-        rootSwitch.setText("Connect with root (helper)");
+        rootSwitch.setText(R.string.root_switch);
         rootSwitch.setTextSize(14);
         rootSwitch.setPadding(0, dp(16), 0, 0);
-        rootSwitch.setChecked(prefs.getBoolean(KEY_USE_ROOT, false));
+        rootSwitch.setChecked(prefs.getBoolean(KEY_USE_ROOT, true));
         rootSwitch.setOnCheckedChangeListener((v, checked) ->
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
                 .putBoolean(KEY_USE_ROOT, checked).apply());
         root.addView(rootSwitch);
 
         TextView rootHint = new TextView(this);
-        rootHint.setText("Launches a root helper (su) that connects to the socket "
-            + "and passes the connection back to the app. Takes effect on next "
-            + "connect (reopen the app).");
+        rootHint.setText(R.string.root_hint);
         rootHint.setTextSize(12);
         rootHint.setTextColor(Color.GRAY);
         rootHint.setPadding(0, dp(4), 0, 0);
@@ -469,7 +582,7 @@ public class SettingsActivity extends Activity {
         // desktop as a recording source. Requires the RECORD_AUDIO permission, which
         // MainActivity requests when this is on.
         Switch micSwitch = new Switch(this);
-        micSwitch.setText("Forward microphone to desktop");
+        micSwitch.setText(R.string.mic_switch);
         micSwitch.setTextSize(14);
         micSwitch.setPadding(0, dp(16), 0, 0);
         micSwitch.setChecked(prefs.getBoolean(KEY_MIC_ENABLED, false));
@@ -479,9 +592,7 @@ public class SettingsActivity extends Activity {
         root.addView(micSwitch);
 
         TextView micHint = new TextView(this);
-        micHint.setText("Desktop audio always plays through this device's speaker. "
-            + "Enabling this also sends the mic the other way. Takes effect on next "
-            + "connect (reopen the app).");
+        micHint.setText(R.string.mic_hint);
         micHint.setTextSize(12);
         micHint.setTextColor(Color.GRAY);
         micHint.setPadding(0, dp(4), 0, 0);
@@ -492,7 +603,7 @@ public class SettingsActivity extends Activity {
         // opened once the desktop actually requests a recording). Requires the CAMERA
         // permission, which MainActivity requests when this is enabled.
         Switch cameraSwitch = new Switch(this);
-        cameraSwitch.setText("Forward camera to desktop");
+        cameraSwitch.setText(R.string.camera_switch);
         cameraSwitch.setTextSize(14);
         cameraSwitch.setPadding(0, dp(16), 0, 0);
         cameraSwitch.setChecked(prefs.getBoolean(KEY_CAMERA_ENABLED, false));
@@ -502,10 +613,7 @@ public class SettingsActivity extends Activity {
         root.addView(cameraSwitch);
 
         TextView cameraHint = new TextView(this);
-        cameraHint.setText("Lets the desktop open this device's camera(s) as a video "
-            + "source. The camera only turns on while the desktop is actively "
-            + "recording. Takes effect on next return to the app; first use prompts "
-            + "for the camera permission.");
+        cameraHint.setText(R.string.camera_hint);
         cameraHint.setTextSize(12);
         cameraHint.setTextColor(Color.GRAY);
         cameraHint.setPadding(0, dp(4), 0, 0);
@@ -515,20 +623,19 @@ public class SettingsActivity extends Activity {
         // (capture) paths. The chosen buffer is forwarded to the producer's PipeWire
         // nodes; smaller = lower latency but more risk of audio glitches.
         TextView latTitle = new TextView(this);
-        latTitle.setText("Audio latency");
+        latTitle.setText(R.string.audio_latency_title);
         latTitle.setTextSize(15);
         latTitle.setTypeface(Typeface.DEFAULT_BOLD);
         latTitle.setPadding(0, dp(20), 0, 0);
         root.addView(latTitle);
 
-        root.addView(makeLatencySpinner("Speaker (desktop → phone)",
+        root.addView(makeLatencySpinner(getString(R.string.latency_speaker_label),
                                         KEY_SPEAKER_LATENCY_MS, prefs));
-        root.addView(makeLatencySpinner("Microphone (phone → desktop)",
+        root.addView(makeLatencySpinner(getString(R.string.latency_mic_label),
                                         KEY_MIC_LATENCY_MS, prefs));
 
         TextView latHint = new TextView(this);
-        latHint.setText("Lower presets cut latency but can cause crackles/dropouts on a "
-            + "busy device. Applies when you return to the desktop view.");
+        latHint.setText(R.string.latency_hint);
         latHint.setTextSize(12);
         latHint.setTextColor(Color.GRAY);
         latHint.setPadding(0, dp(4), 0, 0);
@@ -537,21 +644,14 @@ public class SettingsActivity extends Activity {
 
     private void addResolutionSection(LinearLayout root) {
     SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-    
-    TextView header = new TextView(this);
-    header.setText("Display Resolution");
-    header.setTextSize(16);
-    header.setTypeface(null, Typeface.BOLD);
-    header.setPadding(0, dp(32), 0, dp(8));
-    root.addView(header);
-    
+
     // Width / height fields. Created first (but added below the preset picker) so
     // the picker can populate them; their TextWatchers are the single source of
     // truth that persists custom_width/custom_height.
     final EditText widthInput = new EditText(this);
     widthInput.setSingleLine(true);
     widthInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-    widthInput.setHint("Width (e.g. 1920)");
+    widthInput.setHint(R.string.width_hint);
     widthInput.setText(String.valueOf(prefs.getInt("custom_width", 0)));
     widthInput.addTextChangedListener(new TextWatcher() {
         public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
@@ -567,7 +667,7 @@ public class SettingsActivity extends Activity {
     final EditText heightInput = new EditText(this);
     heightInput.setSingleLine(true);
     heightInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-    heightInput.setHint("Height (e.g. 1080)");
+    heightInput.setHint(R.string.height_hint);
     heightInput.setText(String.valueOf(prefs.getInt("custom_height", 0)));
     heightInput.addTextChangedListener(new TextWatcher() {
         public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
@@ -585,7 +685,8 @@ public class SettingsActivity extends Activity {
     // edits leave the fields untouched.
     Spinner presetSpinner = new Spinner(this);
     presetSpinner.setAdapter(new ArrayAdapter<>(this,
-        android.R.layout.simple_spinner_dropdown_item, RES_PRESET_LABELS));
+        android.R.layout.simple_spinner_dropdown_item,
+        getResources().getStringArray(R.array.res_preset_labels)));
     presetSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
         @Override
         public void onItemSelected(AdapterView<?> parent, View v, int pos, long id) {
@@ -601,18 +702,16 @@ public class SettingsActivity extends Activity {
 
     root.addView(widthInput);
     root.addView(heightInput);
-    
+
     TextView hint = new TextView(this);
-    hint.setText("Pick a preset or enter values manually. Leave 0 for native "
-        + "resolution. \"Screen ×\" scales this device's panel (landscape). "
-        + "Takes effect on next connect.");
+    hint.setText(R.string.resolution_hint);
     hint.setTextSize(12);
     hint.setTextColor(Color.GRAY);
     hint.setPadding(0, dp(4), 0, 0);
     root.addView(hint);
     }
 
-    // Maps a RES_PRESET_LABELS index to {width, height}, or null for the index-0
+    // Maps a res_preset_labels index to {width, height}, or null for the index-0
     // placeholder. "Screen ×" presets are derived from the live panel size.
     private int[] resolvePreset(int pos) {
         switch (pos) {
@@ -656,7 +755,8 @@ public class SettingsActivity extends Activity {
 
         Spinner sp = new Spinner(this);
         sp.setAdapter(new ArrayAdapter<>(this,
-            android.R.layout.simple_spinner_dropdown_item, LATENCY_LABELS));
+            android.R.layout.simple_spinner_dropdown_item,
+            getResources().getStringArray(R.array.latency_labels)));
 
         int cur = prefs.getInt(key, 0);
         int idx = 0;
@@ -681,12 +781,13 @@ public class SettingsActivity extends Activity {
     private void startListening() {
         if (isListening) return;
         isListening = true;
-        bindButton.setText("Listening... (5s)");
+        bindButton.setText(getString(R.string.listening_countdown, 5));
 
         listenTimer = new CountDownTimer(5000, 1000) {
             @Override
             public void onTick(long millisUntilFinished) {
-                bindButton.setText("Listening... (" + (millisUntilFinished / 1000) + "s)");
+                bindButton.setText(getString(R.string.listening_countdown,
+                    (int) (millisUntilFinished / 1000)));
             }
 
             @Override
@@ -703,19 +804,22 @@ public class SettingsActivity extends Activity {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         prefs.edit().putInt(KEY_BOUND_KEYCODE, keycode).apply();
 
-        bindButton.setText("Bind Virtual Keyboard Key");
+        bindButton.setText(R.string.bind_key_button);
         updateStatus();
     }
 
     private void updateStatus() {
+        if (statusText == null) return;
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         int bound = prefs.getInt(KEY_BOUND_KEYCODE, UNBOUND);
         if (bound == UNBOUND) {
-            statusText.setText("Current: None");
+            statusText.setText(R.string.status_current_none);
         } else {
-            String name = KEY_NAMES.get(bound);
-            if (name == null) name = "Keycode " + bound;
-            statusText.setText("Current: " + name);
+            int nameRes = KEY_NAME_RES.get(bound);
+            String name = nameRes != 0
+                ? getString(nameRes)
+                : getString(R.string.keycode_unknown, bound);
+            statusText.setText(getString(R.string.status_current, name));
         }
     }
 
@@ -742,7 +846,7 @@ public class SettingsActivity extends Activity {
         try {
             startActivityForResult(intent, REQ_PICK_LAYOUT);
         } catch (android.content.ActivityNotFoundException e) {
-            Toast.makeText(this, "No file picker available", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.toast_no_picker, Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -755,7 +859,7 @@ public class SettingsActivity extends Activity {
         if (uri == null) return;
         String text = readTextFromUri(uri);
         if (text == null) {
-            Toast.makeText(this, "Could not read file", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.toast_read_failed, Toast.LENGTH_SHORT).show();
             return;
         }
         // setText flows through the editor's TextWatcher, which persists + validates.
@@ -779,16 +883,16 @@ public class SettingsActivity extends Activity {
     // Reflect the validity of the custom layout JSON inline under the editor.
     private void updateLayoutStatus(TextView status, String json) {
         if (json == null || json.trim().isEmpty()) {
-            status.setText("Using built-in default layout");
+            status.setText(R.string.layout_status_default);
             status.setTextColor(Color.GRAY);
             return;
         }
         String err = ExtraKeysBar.validateLayout(json);
         if (err == null) {
-            status.setText("✓ Valid layout");
+            status.setText(R.string.layout_status_valid);
             status.setTextColor(0xFF2E7D32);  // green
         } else {
-            status.setText("✗ " + err);
+            status.setText(getString(R.string.layout_status_invalid, err));
             status.setTextColor(0xFFC62828);  // red
         }
     }
