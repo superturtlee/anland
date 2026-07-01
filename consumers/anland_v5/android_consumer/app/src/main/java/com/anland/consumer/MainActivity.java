@@ -360,15 +360,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         updateScreenSize();
         mouseX = screenWidth / 2f;
         mouseY = screenHeight / 2f;
-
-        // Request notification permission on Android 13+, then show notification
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                        != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1003);
-        } else {
-            showSettingsNotification();
-        }
     }
 
     private static final String NOTIFICATION_CHANNEL = "anland_channel";
@@ -446,6 +437,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     protected void onResume() {
         super.onResume();
 
+        // Show settings notification while in foreground
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1003);
+        } else {
+            showSettingsNotification();
+        }
+
         // Re-check accessibility service state on resume
         KeyInterceptor.recheck();
 
@@ -497,6 +497,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     @Override
     protected void onPause() {
         super.onPause();
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (nm != null) nm.cancel(NOTIFICATION_ID);
         DisplayManager dm = getSystemService(DisplayManager.class);
         if (dm != null)
             dm.unregisterDisplayListener(displayListener);
