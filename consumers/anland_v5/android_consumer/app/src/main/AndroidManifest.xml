@@ -8,6 +8,7 @@
 
     <!-- Capture the device camera(s) to forward to the Linux producer (Camera2 NDK). -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <application
