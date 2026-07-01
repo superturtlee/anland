@@ -376,7 +376,7 @@ public class SettingsActivity extends Activity {
         backOpensExtraKeysSwitch.setText(R.string.back_opens_switch);
         backOpensExtraKeysSwitch.setTextSize(14);
         backOpensExtraKeysSwitch.setPadding(0, dp(16), 0, 0);
-        backOpensExtraKeysSwitch.setChecked(prefs.getBoolean(KEY_BACK_OPENS_EXTRA_KEYS, false));
+        backOpensExtraKeysSwitch.setChecked(prefs.getBoolean(KEY_BACK_OPENS_EXTRA_KEYS, true));
         backOpensExtraKeysSwitch.setOnCheckedChangeListener((v, checked) ->
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
                 .putBoolean(KEY_BACK_OPENS_EXTRA_KEYS, checked).apply());
@@ -394,7 +394,7 @@ public class SettingsActivity extends Activity {
         keyboardFloatingSwitch.setText(R.string.keyboard_floating_switch);
         keyboardFloatingSwitch.setTextSize(14);
         keyboardFloatingSwitch.setPadding(0, dp(16), 0, 0);
-        keyboardFloatingSwitch.setChecked(prefs.getBoolean(KEY_KEYBOARD_FLOATING, false));
+        keyboardFloatingSwitch.setChecked(prefs.getBoolean(KEY_KEYBOARD_FLOATING, true));
         keyboardFloatingSwitch.setOnCheckedChangeListener((v, checked) ->
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
                 .putBoolean(KEY_KEYBOARD_FLOATING, checked).apply());

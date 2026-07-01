@@ -304,7 +304,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         mRoot = root;
         mDensity = getResources().getDisplayMetrics().density;
         mKeyboardFloating = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            .getBoolean(KEY_KEYBOARD_FLOATING, false);
+            .getBoolean(KEY_KEYBOARD_FLOATING, true);
         buildExtraKeysBar();
 
         // ADDED: Create VirtualKeyboardView (hidden initially)
@@ -415,7 +415,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // Pick up a Keyboard-floating toggle made in Settings: update the bar's
         // backdrop and re-run the layout so the surface margin tracks the new mode.
         mKeyboardFloating = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            .getBoolean(KEY_KEYBOARD_FLOATING, false);
+            .getBoolean(KEY_KEYBOARD_FLOATING, true);
         if (extraKeysBar != null)
             extraKeysBar.setFloating(mKeyboardFloating);
         relayout();
@@ -445,7 +445,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
         // ===== 新增：重新读取触摸板设置 =====
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        isTouchpadMode = prefs.getBoolean(KEY_TOUCHPAD_MODE, true);
+        isTouchpadMode = prefs.getBoolean(KEY_TOUCHPAD_MODE, false);
         mouseAccelStrength = prefs.getFloat(KEY_MOUSE_ACCEL, 1.0f);
         mouseAccelStrength = Math.max(0.5f, Math.min(10.0f, mouseAccelStrength));
     }
@@ -1003,7 +1003,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // Back key toggles the extra-keys bar (without opening the soft keyboard)
         // when enabled in settings. Leaves the default swallow behaviour otherwise.
         if (keyCode == KeyEvent.KEYCODE_BACK
-                && prefs.getBoolean(KEY_BACK_OPENS_EXTRA_KEYS, false)) {
+                && prefs.getBoolean(KEY_BACK_OPENS_EXTRA_KEYS, true)) {
             toggleExtraKeysBar();
             return true;
         }
