@@ -38,8 +38,6 @@
     <string name="auto_show_hint">When ON, extra keys bar appears automatically with the soft keyboard and hides when it closes. When OFF, bar stays visible until manually toggled via settings.</string>
     <string name="back_opens_switch">Back key opens extra keys bar</string>
     <string name="back_opens_hint">When ON, pressing Back while the extra keys bar is hidden shows it; pressing Back again hides it. Use this to reach the extra keys without first opening the soft keyboard.</string>
-    <string name="back_prevent_exit_switch">防止返回键退出</string>
-    <string name="back_prevent_exit_hint">开启后，系统返回手势不会直接退出应用。适用于小米/HyperOS 等返回手势直接调用 onBackPressed() 导致闪退的设备。</string>
     <string name="keyboard_floating_switch">Keyboard floating (overlay display)</string>
     <string name="keyboard_floating_hint">When ON, the soft keyboard and the extra keys bar float over the display area instead of shrinking it; the bar uses a translucent background and rises with the keyboard, but the display is not resized. When OFF, the original behaviour (display shrinks to make room) is kept. Takes effect on next return to the desktop.</string>
 
