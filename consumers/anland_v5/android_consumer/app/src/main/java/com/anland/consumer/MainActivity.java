@@ -32,6 +32,8 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.TextView;
+import android.graphics.drawable.GradientDrawable;
 import android.util.DisplayMetrics;   // ADDED
 
 import java.nio.charset.StandardCharsets;
@@ -77,6 +79,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private InputMethodManager imm;
     private int mImeBottom = 0;   // last IME bottom inset
     private int mBarHeight = 0;   // extra-keys bar height in px
+    private boolean mImeIntentionalShow = false; // true during intentional showSoftInput
     private ExtraKeysBar extraKeysBar;
     private FrameLayout mRoot;    // content root, host of the extra-keys bar
     private float mDensity = 1f;
@@ -87,6 +90,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
     // ADDED: VirtualKeyboardView instance
     private VirtualKeyboardView virtualKeyboardView;
+    private TextView keyboardFab;
 
     // evdev keycodes (linux/input-event-codes.h) for the editing keys a soft
     // keyboard emits as key events rather than text.
@@ -334,17 +338,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         surfaceView.getHolder().addCallback(this);
 
         root.setOnApplyWindowInsetsListener((v, insets) -> {
-            // When the IME hides by any means (toggle, system back, or the IME's
-            // own close button), release the hidden input so its focus state
-            // stays in sync — otherwise reopening needs a second press.
-            if (!insets.isVisible(WindowInsets.Type.ime()))
+            boolean imeVisible = insets.isVisible(WindowInsets.Type.ime());
+            if (imeVisible) {
+                mImeIntentionalShow = false; // IME is now fully visible, reset guard
+            } else if (!mImeIntentionalShow) {
+                // IME hid via system back / IME close button (not our toggle)
                 releaseHiddenInput();
+            }
             applyImeInset(insets);
             return v.onApplyWindowInsets(insets);
         });
 
         setupFullscreen();
         setupCursorHiding();
+
+        // Floating keyboard toggle button – post to ensure layout is ready
+        root.post(() -> initKeyboardFab(root));
 
         // ===== 新增：加载触摸板设置 =====
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -383,6 +392,36 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return (int) (dp * getResources().getDisplayMetrics().density);
     }
 
+    private void initKeyboardFab(FrameLayout parent) {
+        if (keyboardFab != null) return;
+
+        keyboardFab = new TextView(this);
+        keyboardFab.setText("⌨");
+        keyboardFab.setTextColor(Color.WHITE);
+        keyboardFab.setGravity(Gravity.CENTER);
+        keyboardFab.setTextSize(18);
+        keyboardFab.setIncludeFontPadding(false);
+        keyboardFab.setClickable(true);
+        keyboardFab.setFocusable(false);
+        keyboardFab.setElevation(dpToPx(8));
+
+        int fabSize = dpToPx(40);
+        GradientDrawable shape = new GradientDrawable();
+        shape.setShape(GradientDrawable.OVAL);
+        shape.setColor(0xDD1976D2);
+        shape.setSize(fabSize, fabSize);
+        keyboardFab.setBackground(shape);
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(fabSize, fabSize);
+        lp.gravity = Gravity.BOTTOM | Gravity.END;
+        lp.setMargins(0, 0, dpToPx(12), dpToPx(64));
+        parent.addView(keyboardFab, lp);
+
+        keyboardFab.setOnClickListener(v -> toggleSystemKeyboard());
+        keyboardFab.bringToFront();
+        Log.i(TAG, "keyboardFab added at bottom-right, size=" + fabSize);
+    }
+
     private void setupFullscreen() {
         WindowInsetsController ctrl = getWindow().getInsetsController();
         if (ctrl != null) {
@@ -409,8 +448,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // change takes effect on return to the desktop.
         String layoutJson = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             .getString(KEY_EXTRA_KEYS_LAYOUT, "");
-        if (!layoutJson.equals(mAppliedLayoutJson))
+        if (!layoutJson.equals(mAppliedLayoutJson)) {
             rebuildExtraKeysBar();
+            if (keyboardFab != null) keyboardFab.bringToFront();
+        }
 
         // Pick up a Keyboard-floating toggle made in Settings: update the bar's
         // backdrop and re-run the layout so the surface margin tracks the new mode.
@@ -424,6 +465,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // ON the bar tracks the keyboard (hidden now if the IME isn't up); with it
         // OFF the master switch decides. See shouldShowBar.
         setExtraKeysBarVisible(shouldShowBar(isImeVisible()));
+        if (keyboardFab != null) keyboardFab.bringToFront();
 
         setupFullscreen();
         DisplayManager dm = getSystemService(DisplayManager.class);
@@ -863,6 +905,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 } else {
                     virtualKeyboardView.setVisibility(View.VISIBLE);
                     virtualKeyboardView.bringToFront();
+                    if (keyboardFab != null) keyboardFab.bringToFront();
                     // Re-position it (in case screen size changed)
                     positionVirtualKeyboard();
                     // Hide the system IME to avoid overlap with the floating keyboard.
@@ -932,7 +975,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             hiddenInput.setFocusable(true);
             hiddenInput.setFocusableInTouchMode(true);
             hiddenInput.requestFocus();
-            imm.showSoftInput(hiddenInput, InputMethodManager.SHOW_IMPLICIT);
+            mImeIntentionalShow = true;
+            imm.showSoftInput(hiddenInput, InputMethodManager.SHOW_FORCED);
         }
     }
 
