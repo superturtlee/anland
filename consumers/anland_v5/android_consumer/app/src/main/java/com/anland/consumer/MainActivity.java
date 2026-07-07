@@ -1074,10 +1074,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     private boolean isImeVisible() {
-        // Prefer InputMethodManager.isActive() which returns true when the IME
-        // is connected to this window, even in freeform mode where a floating
-        // IME does NOT affect WindowInsets.
-        if (imm != null && imm.isActive()) return true;
         WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
         return insets != null && insets.isVisible(WindowInsets.Type.ime());
     }
