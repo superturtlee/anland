@@ -1,10 +1,9 @@
 --- a/src/inputmethod.cpp	2026-05-12 10:26:46.000000000 +0000
 +++ b/src/inputmethod.cpp	2026-06-24 16:07:19.571120919 +0000
-@@ -615,6 +615,14 @@
+@@ -505,6 +505,14 @@
      }
  }
  
-+
 +void InputMethod::commitText(const QString &text)
 +{
 +    if (text.isEmpty()) {
@@ -12,9 +11,10 @@
 +    }
 +    commitString(m_serial++, text);
 +}
- void InputMethod::commitString(qint32 serial, const QString &text)
++
+ void InputMethod::commitString(quint32 serial, const QString &text)
  {
-     if (auto t1 = waylandServer()->seat()->textInputV1(); t1 && t1->isEnabled()) {
+     if (auto t2 = waylandServer()->seat()->textInputV2(); t2 && t2->isEnabled()) {
 --- a/src/inputmethod.h	2026-05-12 10:26:46.000000000 +0000
 +++ b/src/inputmethod.h	2026-06-24 16:07:19.571367676 +0000
 @@ -71,6 +71,8 @@

@@ -25,6 +25,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="${WORKDIR:-$HOME/anland-rpmbuild}"
 JOBS="$(nproc)"
+DNF_IGNORE_EXCLUDES_OPTS=(--setopt=exclude=)
 
 find_patch() {
     local name="$1" explicit="${2:-}"
@@ -45,25 +46,38 @@ log()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m[warn] %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m[error] %s\033[0m\n' "$*" >&2; exit 1; }
 
+dnf_lock_pkg() {
+    local src="$1" token="${src}*"
+
+    if $SUDO sed -n 's/^exclude=//p' /etc/dnf/dnf.conf 2>/dev/null | tr ' ' '\n' | grep -Fxq "$token"; then
+        return 0
+    fi
+
+    $SUDO grep -q '^exclude=' /etc/dnf/dnf.conf 2>/dev/null \
+        && $SUDO sed -i "s/^exclude=.*/& ${token}/" /etc/dnf/dnf.conf \
+        || echo "exclude=${token}" | $SUDO tee -a /etc/dnf/dnf.conf >/dev/null
+}
+
 build_pkg_rpm() {
     local src="$1" patch="$2" overlay_dir="$3"
 
     log "Installing build tools"
-    $SUDO dnf install -y --setopt=install_weak_deps=False \
+    $SUDO dnf "${DNF_IGNORE_EXCLUDES_OPTS[@]}" install -y --setopt=install_weak_deps=False \
         dnf-plugins-core rpmdevtools rpm-build patch tar xz 2>/dev/null
-
-    log "Installing build dependencies for '$src'"
-    $SUDO dnf builddep -y "$src" 2>/dev/null || warn "dnf builddep for $src had issues; continuing"
 
     log "Fetching source for '$src'"
     rm -rf "${WORKDIR:?}/$src"
     mkdir -p "$WORKDIR/$src"
-    ( cd "$WORKDIR/$src" && dnf download --source "$src" ) \
+    ( cd "$WORKDIR/$src" && dnf "${DNF_IGNORE_EXCLUDES_OPTS[@]}" download --source "$src" ) \
         || die "dnf download --source $src failed"
 
     local srpm
     srpm="$(find "$WORKDIR/$src" -maxdepth 1 -name '*.src.rpm' -type f | head -1)"
     [ -n "$srpm" ] || die "no .src.rpm produced for $src"
+
+    log "Installing build dependencies for '$src'"
+    $SUDO dnf "${DNF_IGNORE_EXCLUDES_OPTS[@]}" builddep -y "$srpm" \
+        || die "dnf builddep failed for $srpm"
 
     log "Unpacking SRPM: $srpm"
     rpmdev-setuptree
@@ -117,12 +131,10 @@ build_pkg_rpm() {
 
     log "Installing built .rpm(s) for '$src'"
     # shellcheck disable=SC2086
-    $SUDO dnf install -y --allowerasing $rpms || warn "dnf install for $src reported issues"
+    $SUDO dnf "${DNF_IGNORE_EXCLUDES_OPTS[@]}" install -y --allowerasing $rpms || warn "dnf install for $src reported issues"
 
     log "Locking '$src' against dnf updates"
-    $SUDO grep -q '^exclude=' /etc/dnf/dnf.conf 2>/dev/null \
-        && $SUDO sed -i "s/^exclude=.*/& ${src}*/" /etc/dnf/dnf.conf \
-        || echo "exclude=${src}*" | $SUDO tee -a /etc/dnf/dnf.conf >/dev/null
+    dnf_lock_pkg "$src"
 }
 
 main() {
