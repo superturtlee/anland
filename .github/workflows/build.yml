@@ -58,7 +58,7 @@ jobs:
       - name: Build APK (Landscape)
         working-directory: consumers/anland_v5/android_consumer
         run: |
-          sed -i 's/android:screenOrientation="fullSensor"/android:screenOrientation="sensorLandscape"/' app/src/main/AndroidManifest.xml
+          sed -i 's/android:screenOrientation="fullSensor"/android:screenOrientation="sensorLandscape"/g' app/src/main/AndroidManifest.xml
           ./gradlew clean assembleRelease
           cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/anland-v5-landscape.apk
 
