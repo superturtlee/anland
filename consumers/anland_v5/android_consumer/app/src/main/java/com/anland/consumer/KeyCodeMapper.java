@@ -73,6 +73,10 @@ public class KeyCodeMapper {
         MAP.put(KeyEvent.KEYCODE_CTRL_RIGHT, 97);
         MAP.put(KeyEvent.KEYCODE_ALT_LEFT, 56);
         MAP.put(KeyEvent.KEYCODE_ALT_RIGHT, 100);
+        MAP.put(KeyEvent.KEYCODE_META_LEFT, 125);
+        MAP.put(KeyEvent.KEYCODE_META_RIGHT, 126);
+        MAP.put(KeyEvent.KEYCODE_SEARCH, 125);
+        MAP.put(KeyEvent.KEYCODE_ASSIST, 125);
         MAP.put(KeyEvent.KEYCODE_CAPS_LOCK, 58);
 
         // 方向键
@@ -94,6 +98,18 @@ public class KeyCodeMapper {
         MAP.put(KeyEvent.KEYCODE_F10, 68);
         MAP.put(KeyEvent.KEYCODE_F11, 87);  // 修正
         MAP.put(KeyEvent.KEYCODE_F12, 88);  // 修正
+        MAP.put(KeyEvent.KEYCODE_F13, 183);
+        MAP.put(KeyEvent.KEYCODE_F14, 184);
+        MAP.put(KeyEvent.KEYCODE_F15, 185);
+        MAP.put(KeyEvent.KEYCODE_F16, 186);
+        MAP.put(KeyEvent.KEYCODE_F17, 187);
+        MAP.put(KeyEvent.KEYCODE_F18, 188);
+        MAP.put(KeyEvent.KEYCODE_F19, 189);
+        MAP.put(KeyEvent.KEYCODE_F20, 190);
+        MAP.put(KeyEvent.KEYCODE_F21, 191);
+        MAP.put(KeyEvent.KEYCODE_F22, 192);
+        MAP.put(KeyEvent.KEYCODE_F23, 193);
+        MAP.put(KeyEvent.KEYCODE_F24, 194);
 
         // Home / End
         MAP.put(KeyEvent.KEYCODE_MOVE_HOME, 102);

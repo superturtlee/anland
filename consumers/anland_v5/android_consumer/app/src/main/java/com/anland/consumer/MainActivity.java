@@ -933,18 +933,7 @@ public class MainActivity extends Activity
             return true;
         }
 
-        int scanCode = event.getScanCode();
-        if (scanCode != 0) {
-            mNative.sendKey(0, scanCode);
-            return true;
-        }
-
-        // fallback: when scancode is 0 (e.g. Fn key combos), map via KeyCodeMapper
-        int evdev = KeyCodeMapper.getScanCode(keyCode);
-        if (evdev != -1) {
-            mNative.sendKey(0, evdev);
-            return true;
-        }
+        forwardKeyToLinux(event);
         return true;
     }
 
@@ -964,25 +953,38 @@ public class MainActivity extends Activity
         if (event.getRepeatCount() > 0)
             return true;
 
-        int scanCode = event.getScanCode();
-        if (scanCode != 0 && event.getKeyCode() == KeyEvent.KEYCODE_UNKNOWN) {
-            // Some Fn combos deliver KEYCODE_UNKNOWN with a valid scancode
-            mNative.sendKey(event.getAction() == KeyEvent.ACTION_DOWN ? 0 : 1, scanCode);
-            return true;
-        }
+        return forwardKeyToLinux(event);
+    }
 
-        int evdev = KeyCodeMapper.getScanCode(event.getKeyCode());
-        if (evdev != -1) {
-            mNative.sendKey(event.getAction() == KeyEvent.ACTION_DOWN ? 0 : 1, evdev);
-            return true;
-        }
+    private boolean forwardKeyToLinux(KeyEvent event) {
+        int keyCode = event.getKeyCode();
+        int action = event.getAction() == KeyEvent.ACTION_DOWN ? 0 : 1;
+        int evdev = -1;
 
-        // If both keyCode and scancode are unknown, store/replay raw scancode anyway
-        if (scanCode != 0) {
-            mNative.sendKey(event.getAction() == KeyEvent.ACTION_DOWN ? 0 : 1, scanCode);
-            return true;
-        }
+        // Reserved Android keys may carry vendor scan codes that Linux does not
+        // recognize, so prefer their explicit evdev mapping.
+        if (shouldPreferMappedKey(keyCode))
+            evdev = KeyCodeMapper.getScanCode(keyCode);
+
+        if (evdev == -1 && event.getScanCode() != 0)
+            evdev = event.getScanCode();
+
+        if (evdev == -1)
+            evdev = KeyCodeMapper.getScanCode(keyCode);
+
+        if (evdev == -1)
+            return false;
+
+        mNative.sendKey(action, evdev);
         return true;
+    }
+
+    private static boolean shouldPreferMappedKey(int keyCode) {
+        return keyCode == KeyEvent.KEYCODE_META_LEFT
+                || keyCode == KeyEvent.KEYCODE_META_RIGHT
+                || keyCode == KeyEvent.KEYCODE_SEARCH
+                || keyCode == KeyEvent.KEYCODE_ASSIST
+                || (keyCode >= KeyEvent.KEYCODE_F13 && keyCode <= KeyEvent.KEYCODE_F24);
     }
 
     public boolean isAccessibilityInterceptEnabled() {
@@ -992,18 +994,7 @@ public class MainActivity extends Activity
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
-        int scanCode = event.getScanCode();
-        if (scanCode != 0) {
-            mNative.sendKey(1, scanCode);
-            return true;
-        }
-
-        // fallback: when scancode is 0, map via KeyCodeMapper
-        int evdev = KeyCodeMapper.getScanCode(keyCode);
-        if (evdev != -1) {
-            mNative.sendKey(1, evdev);
-            return true;
-        }
+        forwardKeyToLinux(event);
         return true;
     }
 

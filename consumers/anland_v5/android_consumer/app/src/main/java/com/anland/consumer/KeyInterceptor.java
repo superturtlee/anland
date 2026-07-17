@@ -69,10 +69,17 @@ public class KeyInterceptor extends AccessibilityService {
     private static void disableImmediately() {
         if (self == null) return;
         android.util.Log.d("KeyInterceptor", "disabling interception service");
-        self.setServiceInfo(new AccessibilityServiceInfo() {{
-            flags = DEFAULT;
-        }});
+        AccessibilityServiceInfo info = self.getServiceInfo();
+        info.flags &= ~AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+        self.setServiceInfo(info);
         self.enabled = false;
+    }
+
+    @Override
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        self = this;
+        recheck();
     }
 
     public static void recheck() {
@@ -82,9 +89,9 @@ public class KeyInterceptor extends AccessibilityService {
             if (shouldBeEnabled) {
                 handler.removeCallbacks(disableImmediatelyCallback);
                 android.util.Log.d("KeyInterceptor", "enabling interception service");
-                self.setServiceInfo(new AccessibilityServiceInfo() {{
-                    flags = FLAG_REQUEST_FILTER_KEY_EVENTS;
-                }});
+                AccessibilityServiceInfo info = self.getServiceInfo();
+                info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+                self.setServiceInfo(info);
                 self.enabled = true;
             } else {
                 handler.postDelayed(disableImmediatelyCallback, 120000);
@@ -103,16 +110,19 @@ public class KeyInterceptor extends AccessibilityService {
         if (!instance.hasWindowFocus())
             return false;
 
+        int keyCode = event.getKeyCode();
+        boolean releaseTrackedKey = event.getAction() == KeyEvent.ACTION_UP
+                && pressedKeys.contains(keyCode);
         boolean intercept = instance.isAccessibilityInterceptEnabled();
 
         boolean ret = false;
-        if (intercept || (event.getAction() == KeyEvent.ACTION_UP && pressedKeys.contains(event.getKeyCode())))
+        if (intercept || releaseTrackedKey)
             ret = instance.handleAccessibilityKey(event);
 
-        if (intercept && event.getAction() == KeyEvent.ACTION_DOWN)
-            pressedKeys.add(event.getKeyCode());
+        if (intercept && ret && event.getAction() == KeyEvent.ACTION_DOWN)
+            pressedKeys.add(keyCode);
         else if (event.getAction() == KeyEvent.ACTION_UP)
-            pressedKeys.remove(event.getKeyCode());
+            pressedKeys.remove(keyCode);
 
         recheck();
 
