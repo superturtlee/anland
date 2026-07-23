@@ -35,10 +35,13 @@
     <string name="accessibility_hint">透過無障礙服務攔截功能鍵（Fn、F1-F12 等）。如果外接鍵盤的 Fn 組合鍵無法傳到桌面，請啟用此項。需要在系統 設定 &gt; 無障礙 中授予無障礙權限（僅需一次）。</string>
 
     <!-- Extra keys bar -->
-    <string name="extra_keys_switch">擴充按鍵列（特殊按鍵）</string>
-    <string name="extra_keys_hint">顯示類似 Termux 的底部按鍵列，包含 ESC/TAB/CTRL/ALT/方向鍵/PgUp 等。顯示區域會縮小以騰出空間，按鍵列會隨軟鍵盤一起升起。下次返回桌面檢視時生效。</string>
-    <string name="auto_show_switch">隨軟鍵盤自動顯示擴充按鍵</string>
-    <string name="auto_show_hint">開啟時，擴充按鍵列會隨軟鍵盤自動出現，並在軟鍵盤關閉時隱藏。關閉時，按鍵列會一直顯示，直到在設定中手動切換。</string>
+    <string name="extra_keys_mode_label">擴充按鍵列模式</string>
+    <string name="extra_keys_mode_hint">控制何時顯示類似 Termux 的底部按鍵列（含 ESC/TAB/CTRL/ALT/方向鍵/PgUp 等）。顯示區域會縮小以騰出空間，按鍵列會隨軟鍵盤一起升起。下次返回桌面檢視時生效。</string>
+    <string-array name="extra_keys_mode_options">
+        <item>始終顯示</item>
+        <item>不顯示</item>
+        <item>隨軟鍵盤顯示</item>
+    </string-array>
     <string name="back_opens_switch">返回鍵開啟擴充按鍵列</string>
     <string name="back_opens_hint">開啟時，在擴充按鍵列隱藏狀態下按返回鍵會顯示它，再次按返回鍵則隱藏。可用於無需先開啟軟鍵盤即可使用擴充按鍵。</string>
     <string name="keyboard_floating_switch">鍵盤懸浮（覆蓋顯示區域）</string>

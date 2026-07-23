@@ -35,10 +35,13 @@
     <string name="accessibility_hint">Intercept function keys (Fn, F1-F12 etc.) via AccessibilityService. Enable this if external keyboard Fn combos don\'t reach the desktop. Requires Accessibility permission granted in system Settings &gt; Accessibility (one-time).</string>
 
     <!-- Extra keys bar -->
-    <string name="extra_keys_switch">Extra Keys Bar (special keys)</string>
-    <string name="extra_keys_hint">Show a Termux-style bottom bar with ESC/TAB/CTRL/ALT/arrows/PgUp etc. The display area shrinks to make room; the bar rises together with the soft keyboard. Takes effect on next return to the desktop view.</string>
-    <string name="auto_show_switch">Auto-show extra keys with keyboard</string>
-    <string name="auto_show_hint">When ON, extra keys bar appears automatically with the soft keyboard and hides when it closes. When OFF, bar stays visible until manually toggled via settings.</string>
+    <string name="extra_keys_mode_label">Extra keys bar mode</string>
+    <string name="extra_keys_mode_hint">Controls when the Termux-style bottom bar with ESC/TAB/CTRL/ALT/arrows/PgUp etc. is shown. The display area shrinks to make room; the bar rises together with the soft keyboard. Takes effect on next return to the desktop view.</string>
+    <string-array name="extra_keys_mode_options">
+        <item>Always show</item>
+        <item>Never show</item>
+        <item>Show with soft keyboard</item>
+    </string-array>
     <string name="back_opens_switch">Back key opens extra keys bar</string>
     <string name="back_opens_hint">When ON, pressing Back while the extra keys bar is hidden shows it; pressing Back again hides it. Use this to reach the extra keys without first opening the soft keyboard.</string>
     <string name="keyboard_floating_switch">Keyboard floating (overlay display)</string>
