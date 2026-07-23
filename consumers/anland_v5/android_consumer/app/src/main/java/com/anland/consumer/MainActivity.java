@@ -83,8 +83,7 @@ public class MainActivity extends Activity
     // (no pipeline was ever initialized). Makes onPause/onResume no-op-and-exit.
     private boolean mForceSettings = false;
     private static final String KEY_ACCESSIBILITY_ENABLED = "accessibility_key_intercept";
-    private static final String KEY_EXTRA_KEYS_ENABLED = "extra_keys_bar";
-    private static final String KEY_AUTO_SHOW_EXTRA_KEYS = "auto_show_extra_keys";
+    private static final String KEY_EXTRA_KEYS_MODE = "extra_keys_mode";
     private static final String KEY_BACK_OPENS_EXTRA_KEYS = "back_opens_extra_keys";
     private static final String KEY_EXTRA_KEYS_LAYOUT = "extra_keys_layout";
     // When on, the IME and extra-keys bar float over the display instead of
@@ -739,17 +738,19 @@ public class MainActivity extends Activity
         relayout();
     }
 
-    // Desired extra-keys bar visibility for the current keyboard state. The two
-    // switches are independent: with "auto-show" ON the bar tracks the keyboard
-    // (regardless of the master switch), so it appears whenever the IME opens —
-    // including via the bound virtual-keyboard key, the app's only other opener.
-    // With "auto-show" OFF the master switch keeps the bar persistently visible.
+    // Desired extra-keys bar visibility for the current keyboard state. The
+    // single three-way preference replaces the old two-switch pair:
+    //   "always"       – bar always visible
+    //   "never"        – bar always hidden
+    //   "with_keyboard" – bar tracks the soft keyboard (default)
     private boolean shouldShowBar(boolean imeVisible) {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        boolean autoShow = prefs.getBoolean(KEY_AUTO_SHOW_EXTRA_KEYS, true);
-        if (autoShow)
-            return imeVisible;
-        return prefs.getBoolean(KEY_EXTRA_KEYS_ENABLED, false);
+        String mode = prefs.getString(KEY_EXTRA_KEYS_MODE, "always");
+        switch (mode) {
+            case "always":   return true;
+            case "never":    return false;
+            default:         return imeVisible;
+        }
     }
 
     // Recompute the surface bottom margin and the bar position from the current

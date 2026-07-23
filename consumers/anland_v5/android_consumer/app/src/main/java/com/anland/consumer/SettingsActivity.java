@@ -49,8 +49,12 @@ public class SettingsActivity extends Activity {
     private static final String KEY_SPEAKER_LATENCY_MS = "speaker_latency_ms";
     private static final String KEY_MIC_LATENCY_MS = "mic_latency_ms";
     private static final String KEY_ACCESSIBILITY_ENABLED = "accessibility_key_intercept";
-    private static final String KEY_EXTRA_KEYS_ENABLED = "extra_keys_bar";
-    private static final String KEY_AUTO_SHOW_EXTRA_KEYS = "auto_show_extra_keys";
+    private static final String KEY_EXTRA_KEYS_MODE = "extra_keys_mode";
+    // Mapped to R.array.extra_keys_mode_options positions
+    private static final String MODE_ALWAYS = "always";
+    private static final String MODE_NEVER = "never";
+    private static final String MODE_WITH_KEYBOARD = "with_keyboard";
+    private static final String[] EXTRA_KEYS_MODES = {MODE_ALWAYS, MODE_NEVER, MODE_WITH_KEYBOARD};
     private static final String KEY_BACK_OPENS_EXTRA_KEYS = "back_opens_extra_keys";
     private static final String KEY_EXTRA_KEYS_LAYOUT = "extra_keys_layout";
     private static final String KEY_KEYBOARD_FLOATING = "keyboard_floating";
@@ -358,41 +362,41 @@ public class SettingsActivity extends Activity {
         header.setPadding(0, dp(24), 0, dp(8));
         root.addView(header);
 
-        // === Extra-keys bar switch ===
-        Switch extraKeysSwitch = new Switch(this);
-        extraKeysSwitch.setText(R.string.extra_keys_switch);
-        extraKeysSwitch.setTextSize(14);
-        extraKeysSwitch.setPadding(0, dp(8), 0, 0);
-        extraKeysSwitch.setChecked(prefs.getBoolean(KEY_EXTRA_KEYS_ENABLED, false));
-        extraKeysSwitch.setOnCheckedChangeListener((v, checked) ->
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
-                .putBoolean(KEY_EXTRA_KEYS_ENABLED, checked).apply());
-        root.addView(extraKeysSwitch);
+        // === Extra keys bar mode selector ===
+        TextView modeLabel = new TextView(this);
+        modeLabel.setText(R.string.extra_keys_mode_label);
+        modeLabel.setTextSize(14);
+        modeLabel.setPadding(0, dp(8), 0, dp(4));
+        root.addView(modeLabel);
 
-        TextView extraKeysHint = new TextView(this);
-        extraKeysHint.setText(R.string.extra_keys_hint);
-        extraKeysHint.setTextSize(12);
-        extraKeysHint.setTextColor(Color.GRAY);
-        extraKeysHint.setPadding(0, dp(4), 0, dp(8));
-        root.addView(extraKeysHint);
+        Spinner modeSpinner = new Spinner(this);
+        modeSpinner.setAdapter(new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_dropdown_item,
+            getResources().getStringArray(R.array.extra_keys_mode_options)));
 
-        // === Auto-show extra keys with keyboard ===
-        Switch autoShowSwitch = new Switch(this);
-        autoShowSwitch.setText(R.string.auto_show_switch);
-        autoShowSwitch.setTextSize(14);
-        autoShowSwitch.setPadding(0, dp(16), 0, 0);
-        autoShowSwitch.setChecked(prefs.getBoolean(KEY_AUTO_SHOW_EXTRA_KEYS, true));
-        autoShowSwitch.setOnCheckedChangeListener((v, checked) ->
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
-                .putBoolean(KEY_AUTO_SHOW_EXTRA_KEYS, checked).apply());
-        root.addView(autoShowSwitch);
+        String curMode = getExtraKeysMode(prefs);
+        int modeIdx = 0; // default: always
+        for (int i = 0; i < EXTRA_KEYS_MODES.length; i++) {
+            if (EXTRA_KEYS_MODES[i].equals(curMode)) { modeIdx = i; break; }
+        }
+        modeSpinner.setSelection(modeIdx);
+        modeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View v, int pos, long id) {
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putString(KEY_EXTRA_KEYS_MODE, EXTRA_KEYS_MODES[pos]).apply();
+            }
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        root.addView(modeSpinner);
 
-        TextView autoShowHint = new TextView(this);
-        autoShowHint.setText(R.string.auto_show_hint);
-        autoShowHint.setTextSize(12);
-        autoShowHint.setTextColor(Color.GRAY);
-        autoShowHint.setPadding(0, dp(4), 0, dp(8));
-        root.addView(autoShowHint);
+        TextView modeHint = new TextView(this);
+        modeHint.setText(R.string.extra_keys_mode_hint);
+        modeHint.setTextSize(12);
+        modeHint.setTextColor(Color.GRAY);
+        modeHint.setPadding(0, dp(4), 0, dp(8));
+        root.addView(modeHint);
 
         // === Back key opens extra keys bar ===
         Switch backOpensExtraKeysSwitch = new Switch(this);
@@ -986,5 +990,18 @@ public class SettingsActivity extends Activity {
 
     private int dp(int dp) {
         return (int) (dp * getResources().getDisplayMetrics().density);
+    }
+
+    // Read the extra-keys mode, migrating from the old two-switch prefs if needed.
+    private String getExtraKeysMode(SharedPreferences prefs) {
+        String mode = prefs.getString(KEY_EXTRA_KEYS_MODE, null);
+        if (mode != null) return mode;
+        // Migrate from legacy boolean keys
+        boolean autoShow = prefs.getBoolean("auto_show_extra_keys", true);
+        boolean enabled = prefs.getBoolean("extra_keys_bar", false);
+        mode = autoShow ? MODE_WITH_KEYBOARD : (enabled ? MODE_ALWAYS : MODE_NEVER);
+        prefs.edit().putString(KEY_EXTRA_KEYS_MODE, mode)
+              .remove("auto_show_extra_keys").remove("extra_keys_bar").apply();
+        return mode;
     }
 }
