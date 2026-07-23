@@ -4,7 +4,7 @@
 
     <!-- Titles / section headers -->
     <string name="settings_title">设置</string>
-    <string name="section_virtual_keyboard">软键盘按键</string>
+    <string name="section_virtual_keyboard">软键盘切换键</string>
     <string name="section_extra_keys">扩展按键栏</string>
     <string name="section_custom_layout">自定义扩展按键布局</string>
     <string name="section_touchpad">触摸板设置</string>
@@ -24,7 +24,7 @@
     <string name="cat_general_subtitle">设置通知</string>
 
     <!-- Bind key -->
-    <string name="bind_key_button">绑定软键盘按键</string>
+    <string name="bind_key_button">绑定软键盘切换键</string>
     <string name="listening_countdown">正在监听…（%1$d 秒）</string>
     <string name="status_current_none">当前：无</string>
     <string name="status_current">当前：%1$s</string>
@@ -36,14 +36,14 @@
 
     <!-- Extra keys bar -->
     <string name="extra_keys_mode_label">扩展按键栏模式</string>
-    <string name="extra_keys_mode_hint">控制何时显示类似 Termux 的底部按键栏（含 ESC/TAB/CTRL/ALT/方向键/PgUp 等）。显示区域会缩小以腾出空间，按键栏会随软键盘一起升起。下次返回桌面视图时生效。</string>
+    <string name="extra_keys_mode_hint">控制何时显示类似 Termux 的底部按键栏（含 ESC/TAB/CTRL/ALT/方向键/PgUp 等）。下次返回桌面视图时生效。</string>
     <string-array name="extra_keys_mode_options">
         <item>始终显示</item>
         <item>不显示</item>
         <item>随软键盘显示</item>
     </string-array>
-    <string name="back_opens_switch">返回键打开扩展按键栏</string>
-    <string name="back_opens_hint">开启时，在扩展按键栏隐藏状态下按返回键会显示它，再次按返回键则隐藏。可用于无需先打开软键盘即可使用扩展按键。</string>
+    <string name="back_opens_switch">返回键快速切换扩展按键栏</string>
+    <string name="back_opens_hint">开启时，在扩展按键栏隐藏状态下按返回键会显示它，再次按返回键则隐藏。</string>
     <string name="keyboard_floating_switch">键盘悬浮（覆盖显示区域）</string>
     <string name="keyboard_floating_hint">开启时，软键盘和扩展按键栏会悬浮在显示区域之上，而不是缩小显示区域；按键栏使用半透明背景并随键盘升起，但显示区域不会被调整大小。关闭时保持原有行为（显示区域缩小以腾出空间）。下次返回桌面时生效。</string>
 

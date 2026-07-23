@@ -745,7 +745,7 @@ public class MainActivity extends Activity
     //   "with_keyboard" – bar tracks the soft keyboard (default)
     private boolean shouldShowBar(boolean imeVisible) {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        String mode = prefs.getString(KEY_EXTRA_KEYS_MODE, "with_keyboard");
+        String mode = prefs.getString(KEY_EXTRA_KEYS_MODE, "always");
         switch (mode) {
             case "always":   return true;
             case "never":    return false;

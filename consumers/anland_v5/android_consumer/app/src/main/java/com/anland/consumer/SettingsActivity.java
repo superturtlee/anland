@@ -375,7 +375,7 @@ public class SettingsActivity extends Activity {
             getResources().getStringArray(R.array.extra_keys_mode_options)));
 
         String curMode = getExtraKeysMode(prefs);
-        int modeIdx = 2; // default: with_keyboard
+        int modeIdx = 0; // default: always
         for (int i = 0; i < EXTRA_KEYS_MODES.length; i++) {
             if (EXTRA_KEYS_MODES[i].equals(curMode)) { modeIdx = i; break; }
         }
