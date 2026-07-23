@@ -55,6 +55,8 @@ public class SettingsActivity extends Activity {
     private static final String KEY_EXTRA_KEYS_LAYOUT = "extra_keys_layout";
     private static final String KEY_KEYBOARD_FLOATING = "keyboard_floating";
     private static final String KEY_NOTIFICATION_ENABLED = "settings_notification";
+    private static final String KEY_ORIENTATION = "screen_orientation";
+    private static final String[] ORIENTATION_VALUES = {"default", "landscape", "portrait"};
     private static final String DEFAULT_SOCKET_PATH = "/data/local/tmp/display_daemon.sock";
     private static final int UNBOUND = -1;
 
@@ -281,6 +283,7 @@ public class SettingsActivity extends Activity {
     private void showGeneralPage() {
         currentPage = Page.GENERAL;
         LinearLayout root = newPage(R.string.cat_general_title);
+        buildOrientationSection(root);
         buildNotificationSection(root);
         setContent(root);
     }
@@ -498,6 +501,45 @@ public class SettingsActivity extends Activity {
     // ============================================================
     // General page sections
     // ============================================================
+    private void buildOrientationSection(LinearLayout root) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+        TextView header = new TextView(this);
+        header.setText(R.string.section_orientation);
+        header.setTextSize(16);
+        header.setTypeface(null, Typeface.BOLD);
+        header.setPadding(0, 0, 0, dp(8));
+        root.addView(header);
+
+        TextView label = new TextView(this);
+        label.setText(R.string.orientation_label);
+        label.setTextSize(14);
+        label.setPadding(0, dp(8), 0, dp(4));
+        root.addView(label);
+
+        Spinner spinner = new Spinner(this);
+        spinner.setAdapter(new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_dropdown_item,
+            getResources().getStringArray(R.array.orientation_options)));
+
+        String cur = prefs.getString(KEY_ORIENTATION, "default");
+        int idx = 0;
+        for (int i = 0; i < ORIENTATION_VALUES.length; i++) {
+            if (ORIENTATION_VALUES[i].equals(cur)) { idx = i; break; }
+        }
+        spinner.setSelection(idx);
+        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View v, int pos, long id) {
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putString(KEY_ORIENTATION, ORIENTATION_VALUES[pos]).apply();
+            }
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        root.addView(spinner);
+    }
+
     private void buildNotificationSection(LinearLayout root) {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 

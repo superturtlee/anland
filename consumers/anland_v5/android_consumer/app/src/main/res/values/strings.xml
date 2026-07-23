@@ -21,7 +21,16 @@
     <string name="cat_connection_subtitle">Socket, root, mic, camera &amp; audio latency</string>
     <string name="cat_resolution_subtitle">Output resolution &amp; presets</string>
     <string name="cat_general_title">General</string>
-    <string name="cat_general_subtitle">Settings notification</string>
+    <string name="cat_general_subtitle">Screen orientation &amp; settings notification</string>
+
+    <!-- Screen orientation -->
+    <string name="section_orientation">Screen Orientation</string>
+    <string name="orientation_label">Force screen orientation</string>
+    <string-array name="orientation_options">
+        <item>Default (system)</item>
+        <item>Force landscape</item>
+        <item>Force portrait</item>
+    </string-array>
 
     <!-- Bind key -->
     <string name="bind_key_button">Bind Virtual Keyboard Key</string>

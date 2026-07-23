@@ -21,7 +21,16 @@
     <string name="cat_connection_subtitle">套接字、root、麦克风、摄像头与音频延迟</string>
     <string name="cat_resolution_subtitle">输出分辨率与预设</string>
     <string name="cat_general_title">通用</string>
-    <string name="cat_general_subtitle">设置通知</string>
+    <string name="cat_general_subtitle">屏幕方向与设置通知</string>
+
+    <!-- Screen orientation -->
+    <string name="section_orientation">屏幕方向</string>
+    <string name="orientation_label">强制屏幕方向</string>
+    <string-array name="orientation_options">
+        <item>默认（跟随系统）</item>
+        <item>强制横屏</item>
+        <item>强制竖屏</item>
+    </string-array>
 
     <!-- Bind key -->
     <string name="bind_key_button">绑定虚拟键盘按键</string>

@@ -21,7 +21,16 @@
     <string name="cat_connection_subtitle">socket、root、麥克風、相機與音訊延遲</string>
     <string name="cat_resolution_subtitle">輸出解析度與預設</string>
     <string name="cat_general_title">一般</string>
-    <string name="cat_general_subtitle">設定通知</string>
+    <string name="cat_general_subtitle">螢幕方向與設定通知</string>
+
+    <!-- Screen orientation -->
+    <string name="section_orientation">螢幕方向</string>
+    <string name="orientation_label">強制螢幕方向</string>
+    <string-array name="orientation_options">
+        <item>預設（跟隨系統）</item>
+        <item>強制橫屏</item>
+        <item>強制豎屏</item>
+    </string-array>
 
     <!-- Bind key -->
     <string name="bind_key_button">綁定虛擬鍵盤按鍵</string>

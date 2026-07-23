@@ -8,6 +8,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.hardware.display.DisplayManager;
 import android.content.SharedPreferences;
@@ -278,6 +279,8 @@ public class MainActivity extends Activity
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        applyOrientation();
 
         // Apply the launch parameters: socket path (overrides the saved pref) and
         // window name (task title). Read them before anything else so the dedup
@@ -845,6 +848,23 @@ public class MainActivity extends Activity
         boolean visible = extraKeysBar != null
             && extraKeysBar.getVisibility() == View.VISIBLE;
         setExtraKeysBarVisible(!visible);
+    }
+
+    // Apply the screen-orientation preference (default / landscape / portrait).
+    private void applyOrientation() {
+        String mode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .getString("screen_orientation", "default");
+        switch (mode) {
+            case "landscape":
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+                break;
+            case "portrait":
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                break;
+            default:
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+                break;
+        }
     }
 
     // ---- SystemIME.Host ----
