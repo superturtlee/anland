@@ -11,6 +11,7 @@
     <string name="section_connection">Connection</string>
     <string name="section_resolution">Display Resolution</string>
     <string name="section_notification">Settings Notification</string>
+    <string name="section_fcl_controller">FCL Controller</string>
 
     <!-- Settings home: category rows and back navigation -->
     <string name="nav_back">‹ Back</string>
@@ -65,6 +66,24 @@
         <item>Never show</item>
         <item>Show with soft keyboard</item>
     </string-array>
+    <string name="fcl_controller_label">Controller</string>
+    <string name="fcl_controller_hint">Shows FoldCraftLauncher controller layouts (from the FCL-Controllers project) as an overlay; buttons and the joystick are converted into desktop key/mouse input. The FCL key in the extra keys bar toggles it at any time.</string>
+    <string name="bottom_overlay_label">Overlay controls</string>
+    <string-array name="bottom_overlay_options">
+        <item>Original extra-keys bar</item>
+        <item>FCL controller</item>
+    </string-array>
+    <string name="bottom_overlay_hint">Choose the overlay controls: the original extra-keys bar or the FCL controller. When FCL is selected, the bottom bar is hidden.</string>
+    <string name="fcl_always_switch">Always lock overlay in foreground</string>
+    <string name="fcl_always_hint">When ON the FCL overlay stays visible and Back cannot hide it. When OFF, Back shows/hides it.</string>
+    <string name="fcl_import">Import</string>
+    <string name="fcl_export">Export</string>
+    <string name="fcl_import_done">Controller imported</string>
+    <string name="fcl_import_invalid">Invalid FCL controller file</string>
+    <string name="fcl_export_done">Controller exported</string>
+    <string name="fcl_export_failed">Export failed</string>
+    <string name="fcl_reset_layout">Reset positions</string>
+    <string name="fcl_reset_done">Layout positions reset</string>
     <string name="back_opens_switch">Back key quickly toggles extra keys bar</string>
     <string name="back_opens_hint">When ON, pressing Back while the extra keys bar is hidden shows it; pressing Back again hides it.</string>
     <string name="keyboard_floating_switch">Keyboard floating (overlay display)</string>

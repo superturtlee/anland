@@ -1013,14 +1013,14 @@ Java_com_anland_consumer_Native_nativeSendMouseButton(
 
 JNIEXPORT void JNICALL
 Java_com_anland_consumer_Native_nativeSendMouseScroll(
-    JNIEnv *env, jclass clazz, jlong handle, jint axis, jfloat value)
+    JNIEnv *env, jclass clazz, jlong handle, jint axis, jfloat value, jint discrete)
 {
     struct consumer_state *s = STATE(handle);
     if (!s || !s->ctx)
         return;
     struct InputEvent ev = {
         .type = INPUT_TYPE_POINTER_AXIS,
-        .pointer_axis = { .axis = axis, .value = value, .discrete = 0 },
+        .pointer_axis = { .axis = axis, .value = value, .discrete = discrete },
     };
     push_input_event(s->ctx, &ev);
 }

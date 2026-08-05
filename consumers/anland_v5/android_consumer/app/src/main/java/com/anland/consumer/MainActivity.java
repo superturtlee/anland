@@ -13,6 +13,7 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.hardware.display.DisplayManager;
 import android.content.SharedPreferences;
+import android.graphics.PixelFormat;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
@@ -103,6 +104,26 @@ public class MainActivity extends Activity
     // shrinking it: the bar rides up with the keyboard but the surface keeps
     // its full size. See relayout() and buildExtraKeysBar().
     private static final String KEY_KEYBOARD_FLOATING = "keyboard_floating";
+    // FCL controller overlay (FoldCraftLauncher controller files from
+    // FCL-Controllers, rendered by FclControllerView).
+    private static final String KEY_FCL_CONTROLLER = "fcl_controller_id";
+    private static final String DEFAULT_FCL_CONTROLLER = "00000000";
+    // Portrait orientation uses its own controller profile (defaults to a bundled
+    // copy of the Default controller so both orientations start with the same keys).
+    private static final String KEY_FCL_CONTROLLER_PORTRAIT = "fcl_controller_id_portrait";
+    private static final String DEFAULT_FCL_CONTROLLER_PORTRAIT = "00000001";
+    // One-shot request from Settings: open the overlay straight into edit mode.
+    private static final String KEY_FCL_EDIT_REQUESTED = "fcl_edit_requested";
+    // Which profile the Settings 编辑 button asked to edit: "landscape"/"portrait".
+    private static final String KEY_FCL_EDIT_TARGET = "fcl_edit_target";
+    // Which bottom overlay is active: the original extra-keys bar or the FCL
+    // controller. Mutually exclusive (二选一).
+    private static final String KEY_BOTTOM_MODE = "bottom_overlay_mode";
+    private static final String MODE_EXTRA_KEYS = "extra_keys";
+    private static final String MODE_FCL = "fcl";
+    // FCL overlay behaviour: always lock it in the foreground, and let Back
+    // toggle it when unlocked (same pattern as the extra-keys bar).
+    private static final String KEY_FCL_ALWAYS = "fcl_always_foreground";
     private boolean mKeyboardFloating = false;
     // Persistent "tap to open Settings" notification, toggleable in Settings > General.
     private static final String KEY_NOTIFICATION_ENABLED = "settings_notification";
@@ -125,6 +146,17 @@ public class MainActivity extends Activity
 
     // ADDED: VirtualKeyboardView instance
     private VirtualKeyboardView virtualKeyboardView;
+    // FCL controller overlay (hidden until toggled / enabled in Settings).
+    private FclControllerView fclControllerView;
+    private boolean mFclHiddenByBack = false;
+    // Editor dialogs are ordinary app windows below the FCL application panel,
+    // so the panel is temporarily suppressed only while such a dialog is open.
+    // The system IME is deliberately not included here: changing the panel on
+    // every IME transition is the source of the visible black flash on some GPUs.
+    private boolean mFclHiddenForDialog = false;
+    private WindowManager fclWindowManager;
+    private boolean fclWindowAdded = false;
+    private int fclWindowRetries = 0;
 
     // ==================== 触摸板相关设置 ====================
     public static final String KEY_TOUCHPAD_MODE = "touchpad_mode";
@@ -137,6 +169,9 @@ public class MainActivity extends Activity
     public static final String KEY_MOVE_THRESHOLD = "touchpad_move_threshold";
     // Magnifies declined gestures forwarded as touch; see Touchpad.setGestureScale.
     public static final String KEY_GESTURE_SCALE = "touchpad_gesture_scale";
+    // Quick force-landscape override (toggled by the bar's 横屏 key). While ON it
+    // beats the screen_orientation setting; OFF restores the setting's behaviour.
+    public static final String KEY_LANDSCAPE_FORCED = "landscape_forced";
     // Capture an external mouse/touchpad as a relative pointer so it cannot reach
     // the Android screen edges. This is deliberately opt-in: existing installations
     // keep the old absolute-pointer behaviour until the user enables it.
@@ -264,6 +299,12 @@ public class MainActivity extends Activity
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
+        // Once the activity window is attached (focus gained), create the FCL
+        // overlay window if it is supposed to be visible.
+        if (hasFocus && fclControllerView != null && isFclBottomMode()
+                && !mFclHiddenForDialog) {
+            showFclOverlayWindow();
+        }
         if (!isSocketFile(resolveSocketPath())) {
             //exit
             android.widget.Toast.makeText(this, "Deamon Down",
@@ -292,6 +333,20 @@ public class MainActivity extends Activity
         // would leave the user with nothing to answer it with.
         if (!hasFocus && immersive != null)
             immersive.stop();
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // The FCL overlay lives in its own window; recreate it on rotation so the
+        // controls are re-laid out for the new display size (a plain rebuild does
+        // not resize the separate window).
+        if (fclWindowAdded && fclControllerView != null) {
+            removeFclOverlayWindow();
+            // Each orientation has its own controller profile.
+            loadFclController(fclControllerId());
+            showFclOverlayWindow();
+        }
     }
 
     private void pushRefreshRate() {
@@ -454,13 +509,18 @@ public class MainActivity extends Activity
         clipboard = new Clipboard(this, mNative);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-        // Take over inset handling: the IME insets are dispatched to our
-        // OnApplyWindowInsetsListener (so we can resize the surface) instead of
-        // the system auto-panning the fullscreen window.
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+        // Take over inset handling. Android must not resize the SurfaceView on an
+        // IME animation: a Surface resize restarts the native compositor and can
+        // produce a black frame. relayout() applies a manual margin when needed.
         getWindow().setDecorFitsSystemWindows(false);
 
         surfaceView = new SurfaceView(this);
+        // Keep the desktop surface strictly behind the app window content so
+        // overlays (FCL controller etc.) are composited above it.
+        surfaceView.setZOrderOnTop(false);
+        surfaceView.setZOrderMediaOverlay(false);
         // Give the content view an explicit focus target. Pointer-captured events
         // are routed along the focused-view path; the root override below then
         // intercepts them before the focused child handles them.
@@ -523,6 +583,73 @@ public class MainActivity extends Activity
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.NO_GRAVITY
         ));
+
+        // FCL controller overlay (FCL-Controllers layouts). Hidden by default;
+        // shown by the extra-keys "FCL" key or the Settings switch.
+        fclControllerView = new FclControllerView(this);
+        fclControllerView.setBridge(new FclControllerView.Bridge() {
+            @Override public void key(int action, int evdev) {
+                if (mNative != null) mNative.sendKey(action, evdev);
+            }
+            @Override public void mouseButton(int button, boolean pressed) {
+                if (mNative != null) mNative.sendMouseButton(button, pressed);
+            }
+            @Override public void mouseMove(float dx, float dy) {
+                if (mNative != null) movePointerBy(dx, dy);
+            }
+            @Override public void mouseScroll(int axis, float value, int discrete) {
+                if (mNative != null) mNative.sendMouseScroll(axis, value, discrete);
+            }
+            @Override public void text(String text) {
+                if (mNative != null && text != null && !text.isEmpty())
+                    mNative.sendTextInput(text.getBytes(StandardCharsets.UTF_8));
+            }
+            @Override public void toggleIme() { systemIme.toggleSystemKeyboard(); }
+            @Override public void toggleVirtualKeyboard() { toggleFloatingVirtualKeyboard(); }
+            @Override public void openSettings() {
+                startActivity(new Intent(MainActivity.this, SettingsActivity.class));
+            }
+            // The overlay's 新增/删除 management buttons switch this orientation's
+            // controller profile; null means fall back to the bundled default.
+            @Override public void selectController(String id) {
+                SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                String finalId = (id != null && !id.isEmpty()) ? id
+                        : (isPortrait() ? DEFAULT_FCL_CONTROLLER_PORTRAIT
+                                        : DEFAULT_FCL_CONTROLLER);
+                prefs.edit().putString(
+                        isPortrait() ? KEY_FCL_CONTROLLER_PORTRAIT : KEY_FCL_CONTROLLER,
+                        finalId).apply();
+                loadFclController(finalId);
+                if (fclControllerView != null) {
+                    fclControllerView.rebuild();
+                }
+            }
+            // Editor dialogs are app windows BELOW the overlay window; hide the
+            // overlay (keep its window, make it non-touchable) so the dialog is
+            // neither visually covered nor touch-blocked, then restore it.
+            @Override public void setEditorDialogOpen(boolean open) {
+                if (open) {
+                    hideFclControllerForDialog();
+                } else if (isFclBottomMode() && fclControllerView != null
+                        && mFclHiddenForDialog) {
+                    showFclOverlayWindow();
+                }
+            }
+        });
+        fclControllerView.setVisibility(View.GONE);
+        // The FCL overlay lives in its OWN window (TYPE_APPLICATION_PANEL). A
+        // sibling view in this window cannot be composited above the SurfaceView
+        // on this device (verified with an opaque test layer), while a separate
+        // application window always composites above the activity window.
+        fclWindowManager = getSystemService(WindowManager.class);
+        // Route touches outside FCL controls to the normal surface handler so a
+        // finger on a button and another finger swiping the screen work together.
+        fclControllerView.setSurfaceTouchForwarder(this::onTouchEvent);
+        java.util.ArrayList<View> passThrough = new java.util.ArrayList<>();
+        passThrough.add(virtualKeyboardView);
+        passThrough.add(extraKeysBar);
+        fclControllerView.setPassThroughViews(passThrough);
+
         // Reposition the virtual keyboard when the root layout size changes
         // (e.g. freeform / small-window mode resize).
         root.addOnLayoutChangeListener((v, left, top, right, bottom,
@@ -537,6 +664,10 @@ public class MainActivity extends Activity
                 if (virtualKeyboardView != null
                         && virtualKeyboardView.getVisibility() == View.VISIBLE) {
                     positionVirtualKeyboard();
+                }
+                if (fclControllerView != null
+                        && fclControllerView.getVisibility() == View.VISIBLE) {
+                    fclControllerView.rebuild();
                 }
             }
         });
@@ -560,6 +691,12 @@ public class MainActivity extends Activity
                 systemIme.releaseHiddenInput();
                 if (focused == systemIme.getInputView() || getCurrentFocus() == null)
                     surfaceView.requestFocus();
+                // System Back / an IME-owned close button do not go through
+                // SystemIME.toggleSystemKeyboard(), so still notify the host to
+                // sync the extra-keys bar and pointer focus. FCL itself remains
+                // untouched during IME changes (see onImeVisibilityChanged()).
+                if (mImeBottom > 0)
+                    onImeVisibilityChanged(false);
             }
             applyImeInset(insets);
             return v.onApplyWindowInsets(insets);
@@ -654,6 +791,200 @@ public class MainActivity extends Activity
         virtualKeyboardView.setY(y);
         Log.d("VirtualKeyboard", "positionVirtualKeyboard: x=" + x + ", y=" + y
                 + " parent=" + parentW + "x" + parentH + " view=" + w + "x" + h);
+    }
+
+    // Toggle the floating (custom-drawn) virtual keyboard. Shared by the
+    // extra-keys bar popup and the FCL controller "Input"/VK actions.
+    private void toggleFloatingVirtualKeyboard() {
+        if (virtualKeyboardView == null) return;
+        if (virtualKeyboardView.getVisibility() == View.VISIBLE) {
+            virtualKeyboardView.setVisibility(View.GONE);
+        } else {
+            Log.d("VirtualKeyboard", "toggle: showing keyboard, mRoot="
+                    + mRoot.getWidth() + "x" + mRoot.getHeight());
+            virtualKeyboardView.setVisibility(View.VISIBLE);
+            virtualKeyboardView.bringToFront();
+            // Re-position it (in case screen size changed)
+            positionVirtualKeyboard();
+            // Hide the system IME to avoid overlap with the floating keyboard.
+            InputMethodManager imm = getSystemService(InputMethodManager.class);
+            if (imm != null && getCurrentFocus() != null) {
+                imm.hideSoftInputFromWindow(getCurrentFocus().getWindowToken(), 0);
+            }
+        }
+    }
+
+    // ==================== FCL controller overlay ====================
+
+    /** Load a bundled FCL controller and install it on the overlay. */
+    private void loadFclController(String id) {
+        if (fclControllerView == null) return;
+        FclController controller = FclController.load(this, id);
+        if (controller == null) {
+            Log.e(TAG, "loadFclController: failed to load controller " + id);
+            return;
+        }
+        fclControllerView.setController(controller);
+    }
+
+    /** Whether the app window is currently in portrait orientation. */
+    private boolean isPortrait() {
+        return getResources().getConfiguration().orientation
+                == android.content.res.Configuration.ORIENTATION_PORTRAIT;
+    }
+
+    /** Controller profile id for the current orientation. */
+    private String fclControllerId() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        if (isPortrait()) {
+            return prefs.getString(KEY_FCL_CONTROLLER_PORTRAIT,
+                    DEFAULT_FCL_CONTROLLER_PORTRAIT);
+        }
+        return prefs.getString(KEY_FCL_CONTROLLER, DEFAULT_FCL_CONTROLLER);
+    }
+
+    /** Show/hide the overlay according to the Settings switch. */
+    private void applyFclPrefs() {
+        if (fclControllerView == null) return;
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+        // FCL and the original extra-keys bar are mutually exclusive.
+        if (!isFclBottomMode()) {
+            hideFclController();
+            return;
+        }
+        loadFclController(fclControllerId());
+        if (!fclControllerView.hasController()) {
+            return;
+        }
+
+        showFclOverlayWindow();
+    }
+
+    /** Manual toggle (extra-keys bar "FCL" key); works regardless of the switch. */
+    private void toggleFclControllerOverlay() {
+        if (fclControllerView == null) return;
+        if (fclControllerView.getVisibility() == View.VISIBLE) {
+            hideFclController();
+            mFclHiddenByBack = true;
+            return;
+        }
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        loadFclController(fclControllerId());
+        if (!fclControllerView.hasController()) return;
+        mFclHiddenByBack = false;
+        showFclOverlayWindow();
+    }
+
+    /** Hide the overlay and release every key it is holding. */
+    private void hideFclController() {
+        if (fclControllerView == null) return;
+        fclControllerView.releaseAll();
+        fclControllerView.setVisibility(View.GONE);
+        removeFclOverlayWindow();
+        mFclHiddenForDialog = false;
+    }
+
+    /** Add the FCL overlay as a separate window above the activity window. */
+    private void showFclOverlayWindow() {
+        if (fclControllerView == null || fclWindowManager == null) return;
+        boolean newlyAdded = false;
+        if (!fclWindowAdded) {
+            View decor = getWindow().getDecorView();
+            android.os.IBinder token = decor != null ? decor.getWindowToken() : null;
+            if (token == null) {
+                // onResume() runs before the activity window is attached, so the
+                // app token is not valid yet. Retry after the window is attached.
+                if (fclWindowRetries++ < 100 && decor != null) {
+                    decor.post(this::showFclOverlayWindow);
+                } else {
+                    fclWindowRetries = 0;
+                }
+                return;
+            }
+            fclWindowRetries = 0;
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            // Keep this non-focusable application panel below the
+                            // Android IME. Without ALT_FOCUSABLE_IM it is ordered
+                            // above the keyboard, which was why older code hid and
+                            // re-showed the panel on every IME transition.
+                            | WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT);
+            lp.token = token;
+            lp.gravity = Gravity.TOP | Gravity.START;
+            try {
+                fclWindowManager.addView(fclControllerView, lp);
+                fclWindowAdded = true;
+                newlyAdded = true;
+                Log.d(TAG, "FCL overlay window added");
+            } catch (Exception e) {
+                Log.e(TAG, "add FCL overlay window failed", e);
+                return;
+            }
+        }
+        // An IME focus transition can call onWindowFocusChanged(). Rebuilding an
+        // already-visible full-screen panel there briefly leaves the remote Surface
+        // without a composed frame, so rebuild only after a genuinely new attach.
+        if (newlyAdded) {
+            fclControllerView.rebuild();
+        }
+        boolean wasVisible = fclControllerView.getVisibility() == View.VISIBLE;
+        if (!wasVisible) {
+            fclControllerView.setVisibility(View.VISIBLE);
+        }
+        mFclHiddenForDialog = false;
+        setFclOverlayTouchable(true);
+    }
+
+    private void setFclOverlayTouchable(boolean touchable) {
+        if (fclWindowAdded && fclWindowManager != null) {
+            try {
+                WindowManager.LayoutParams lp =
+                        (WindowManager.LayoutParams) fclControllerView.getLayoutParams();
+                int newFlags = touchable
+                        ? lp.flags & ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        : lp.flags | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+                if (newFlags != lp.flags) {
+                    lp.flags = newFlags;
+                    fclWindowManager.updateViewLayout(fclControllerView, lp);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /** Hide only the overlay content while an editor dialog is open. Unlike the
+     *  system IME, editor dialogs share the app window layer and would otherwise
+     *  be covered by the application-panel overlay. */
+    private void hideFclControllerForDialog() {
+        if (fclControllerView == null) return;
+        fclControllerView.releaseAll();
+        fclControllerView.setVisibility(View.INVISIBLE);
+        setFclOverlayTouchable(false);
+        mFclHiddenForDialog = true;
+    }
+
+    /** True when the FCL controller is the selected bottom overlay. */
+    private boolean isFclBottomMode() {
+        return MODE_FCL.equals(getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getString(KEY_BOTTOM_MODE, MODE_EXTRA_KEYS));
+    }
+
+    private void removeFclOverlayWindow() {
+        if (fclWindowAdded && fclWindowManager != null && fclControllerView != null) {
+            try {
+                fclWindowManager.removeView(fclControllerView);
+            } catch (Exception ignored) {
+            }
+            fclWindowAdded = false;
+            Log.d(TAG, "FCL overlay window removed");
+        }
     }
 
     private int dpToPx(int dp) {
@@ -1015,9 +1346,9 @@ public class MainActivity extends Activity
             float vScroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL);
             float hScroll = event.getAxisValue(MotionEvent.AXIS_HSCROLL);
             if (vScroll != 0f)
-                mNative.sendMouseScroll(0, -vScroll * 10f);
+                mNative.sendMouseScroll(0, -vScroll * 10f, discreteOf(-vScroll));
             if (hScroll != 0f)
-                mNative.sendMouseScroll(1, hScroll * 10f);
+                mNative.sendMouseScroll(1, hScroll * 10f, discreteOf(hScroll));
         }
 
         // Button state is present on motion, button, and down/up events.  Keeping
@@ -1277,9 +1608,9 @@ public class MainActivity extends Activity
                 0, historyPos);
         if (vScroll != 0f || hScroll != 0f) {
             if (vScroll != 0f)
-                mNative.sendMouseScroll(0, -vScroll * 10f);
+                mNative.sendMouseScroll(0, -vScroll * 10f, discreteOf(-vScroll));
             if (hScroll != 0f)
-                mNative.sendMouseScroll(1, hScroll * 10f);
+                mNative.sendMouseScroll(1, hScroll * 10f, discreteOf(hScroll));
             return;
         }
 
@@ -1507,6 +1838,28 @@ public class MainActivity extends Activity
         autoStretch = prefs.getBoolean(KEY_AUTO_STRETCH, true);
         relayout();
 
+        // FCL controller overlay: pick up the Settings switch/controller changes.
+        applyFclPrefs();
+        // Settings' 编辑 button asks us to start editing the controller right away.
+        SharedPreferences fclPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        if (fclPrefs.getBoolean(KEY_FCL_EDIT_REQUESTED, false)) {
+            fclPrefs.edit().remove(KEY_FCL_EDIT_REQUESTED).apply();
+            String target = fclPrefs.getString(KEY_FCL_EDIT_TARGET, "landscape");
+            fclPrefs.edit().remove(KEY_FCL_EDIT_TARGET).apply();
+            String editId = "portrait".equals(target)
+                    ? fclPrefs.getString(KEY_FCL_CONTROLLER_PORTRAIT,
+                            DEFAULT_FCL_CONTROLLER_PORTRAIT)
+                    : fclPrefs.getString(KEY_FCL_CONTROLLER, DEFAULT_FCL_CONTROLLER);
+            if (fclControllerView != null) {
+                loadFclController(editId);
+                fclControllerView.rebuild();
+                if (isFclBottomMode()) {
+                    showFclOverlayWindow();
+                }
+                fclControllerView.setEditMode(true);
+            }
+        }
+
         // The socket pref may have been edited in Settings; keep our dedup key current.
         registerWindow();
     }
@@ -1517,6 +1870,8 @@ public class MainActivity extends Activity
         // Socket-missing bounce: no pipeline exists, so skip teardown (mNative is
         // null) and don't let the jump to Settings trigger any of it.
         if (mForceSettings) return;
+        // Release any held FCL controller keys before leaving the window.
+        hideFclController();
         // A session must never outlive the foreground: leaving the input devices
         // grabbed for a window the user has left is how a tablet gets bricked.
         if (immersive != null) immersive.stop();
@@ -1533,6 +1888,7 @@ public class MainActivity extends Activity
 
     @Override
     protected void onDestroy() {
+        hideFclController();
         abandonMediaAudioFocus();
         if (immersive != null) immersive.stop();
         releasePointerCapture(false);
@@ -1701,6 +2057,7 @@ public class MainActivity extends Activity
     //   "never"        – bar always hidden
     //   "with_keyboard" – bar tracks the soft keyboard (default)
     private boolean shouldShowBar(boolean imeVisible) {
+        if (isFclBottomMode()) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         String mode = prefs.getString(KEY_EXTRA_KEYS_MODE, "always");
         switch (mode) {
@@ -1717,8 +2074,11 @@ public class MainActivity extends Activity
         boolean barVisible = extraKeysBar != null && extraKeysBar.getVisibility() == View.VISIBLE;
         int barH = barVisible ? mBarHeight : 0;
         // Floating mode: keyboard + bar overlay the display, so the surface keeps
-        // its full size (target 0). Default mode: shrink the surface above both.
-        int target = mKeyboardFloating ? 0 : (mImeBottom + barH);
+        // its full size (target 0). FCL mode follows the same rule even if the
+        // user disabled floating keyboard: resizing the native Surface for every
+        // IME transition produces a black compositor frame on affected devices.
+        // The traditional extra-keys mode still shrinks above keyboard + bar.
+        int target = (mKeyboardFloating || isFclBottomMode()) ? 0 : (mImeBottom + barH);
 
         FrameLayout.LayoutParams lp =
             (FrameLayout.LayoutParams) surfaceView.getLayoutParams();
@@ -1790,6 +2150,7 @@ public class MainActivity extends Activity
     // is compressed (shown) or restored (hidden).
     private void setExtraKeysBarVisible(boolean visible) {
         if (extraKeysBar == null) return;
+        if (isFclBottomMode()) visible = false;
         boolean cur = extraKeysBar.getVisibility() == View.VISIBLE;
         if (cur == visible) return;
         extraKeysBar.setVisibility(visible ? View.VISIBLE : View.GONE);
@@ -1809,27 +2170,17 @@ public class MainActivity extends Activity
             // Tapping the ⌨ key keeps the original behaviour: toggle the system IME.
             @Override public void toggleKeyboard() { systemIme.toggleSystemKeyboard(); }
             // Pulling up on the ⌨ key toggles the floating virtual keyboard.
-            @Override public void toggleVirtualKeyboard() {
-                if (virtualKeyboardView.getVisibility() == View.VISIBLE) {
-                    virtualKeyboardView.setVisibility(View.GONE);
-                } else {
-                    Log.d("VirtualKeyboard", "toggle: showing keyboard, mRoot="
-                            + mRoot.getWidth() + "x" + mRoot.getHeight());
-                    virtualKeyboardView.setVisibility(View.VISIBLE);
-                    virtualKeyboardView.bringToFront();
-                    // Re-position it (in case screen size changed)
-                    positionVirtualKeyboard();
-                    // Hide the system IME to avoid overlap with the floating keyboard.
-                    InputMethodManager imm = getSystemService(InputMethodManager.class);
-                    if (imm != null && getCurrentFocus() != null) {
-                        imm.hideSoftInputFromWindow(getCurrentFocus().getWindowToken(), 0);
-                    }
-                }
-            }
+            @Override public void toggleVirtualKeyboard() { toggleFloatingVirtualKeyboard(); }
+            // The FCL key toggles the FoldCraftLauncher controller overlay.
+            @Override public void toggleFclController() { toggleFclControllerOverlay(); }
+            // The 横屏 key force-locks the app to landscape; tap again to restore.
+            @Override public void toggleLandscape() { toggleLandscapeForced(); }
             @Override public void openSettings() {
                 startActivity(new Intent(MainActivity.this, SettingsActivity.class));
             }
         });
+        extraKeysBar.setLandscapeActive(getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getBoolean(KEY_LANDSCAPE_FORCED, false));
         mBarHeight = Math.round(37.5f * mDensity * extraKeysBar.getRowCount());
         extraKeysBar.setFloating(mKeyboardFloating);
         extraKeysBar.setVisibility(View.GONE);
@@ -1856,6 +2207,7 @@ public class MainActivity extends Activity
     // Toggle the extra-keys bar on its own (e.g. from the Back key), independent of
     // the soft keyboard. Showing it just compresses the display area above the bar.
     private void toggleExtraKeysBar() {
+        if (isFclBottomMode()) return;
         boolean visible = extraKeysBar != null
             && extraKeysBar.getVisibility() == View.VISIBLE;
         setExtraKeysBarVisible(!visible);
@@ -1863,8 +2215,13 @@ public class MainActivity extends Activity
 
     // Apply the screen-orientation preference (default / landscape / portrait).
     private void applyOrientation() {
-        String mode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            .getString("screen_orientation", "default");
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        // The quick force-landscape toggle wins over the saved setting.
+        if (prefs.getBoolean(KEY_LANDSCAPE_FORCED, false)) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+            return;
+        }
+        String mode = prefs.getString("screen_orientation", "default");
         switch (mode) {
             case "landscape":
                 setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
@@ -1878,6 +2235,16 @@ public class MainActivity extends Activity
         }
     }
 
+    /** Flip the quick force-landscape override and apply it immediately. */
+    private void toggleLandscapeForced() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        boolean forced = !prefs.getBoolean(KEY_LANDSCAPE_FORCED, false);
+        prefs.edit().putBoolean(KEY_LANDSCAPE_FORCED, forced).apply();
+        applyOrientation();
+        if (extraKeysBar != null)
+            extraKeysBar.setLandscapeActive(forced);
+    }
+
     // ---- SystemIME.Host ----
 
     @Override
@@ -1889,6 +2256,10 @@ public class MainActivity extends Activity
     // callback may not fire, so sync the extra-keys bar explicitly here in all modes.
     @Override
     public void onImeVisibilityChanged(boolean visible) {
+        // Keep the FCL application panel completely stable while the Android IME
+        // opens/closes. TYPE_INPUT_METHOD is above TYPE_APPLICATION_PANEL, so the
+        // keyboard owns the covered area without us toggling visibility or window
+        // flags. Those mutations were the remaining source of the black flash.
         String mode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                 .getString(KEY_EXTRA_KEYS_MODE, "always");
         if ("with_keyboard".equals(mode))
@@ -2126,9 +2497,9 @@ public class MainActivity extends Activity
                 float vScroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL);
                 float hScroll = event.getAxisValue(MotionEvent.AXIS_HSCROLL);
                 if (vScroll != 0)
-                    mNative.sendMouseScroll(0, -vScroll * 10);
+                    mNative.sendMouseScroll(0, -vScroll * 10, discreteOf(-vScroll));
                 if (hScroll != 0)
-                    mNative.sendMouseScroll(1, hScroll * 10);
+                    mNative.sendMouseScroll(1, hScroll * 10, discreteOf(hScroll));
                 return true;
             }
             if (action == MotionEvent.ACTION_BUTTON_PRESS
@@ -2163,6 +2534,25 @@ public class MainActivity extends Activity
             return true;
         }
 
+        // FCL bottom mode: Back toggles the overlay unless it is locked to the
+        // foreground, in which case Back is swallowed so the overlay stays up.
+        if (keyCode == KeyEvent.KEYCODE_BACK && isFclBottomMode()) {
+            // While editing the controller, Back first asks whether to save.
+            if (fclControllerView != null && fclControllerView.isEditMode()) {
+                fclControllerView.promptExitEditMode();
+                return true;
+            }
+            if (prefs.getBoolean(KEY_FCL_ALWAYS, false)) {
+                if (fclControllerView == null
+                        || fclControllerView.getVisibility() != View.VISIBLE) {
+                    applyFclPrefs();
+                }
+                return true;
+            }
+            toggleFclControllerOverlay();
+            return true;
+        }
+
         // Back key toggles the extra-keys bar (without opening the soft keyboard)
         // when enabled in settings. Leaves the default swallow behaviour otherwise.
         if (keyCode == KeyEvent.KEYCODE_BACK
@@ -2181,6 +2571,22 @@ public class MainActivity extends Activity
     // unexpectedly finish via gesture navigation.
     @Override
     public void onBackPressed() {
+        // Same FCL handling for OEMs that dispatch Back via onBackPressed().
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        if (isFclBottomMode()) {
+            if (fclControllerView != null && fclControllerView.isEditMode()) {
+                fclControllerView.promptExitEditMode();
+                return;
+            }
+            boolean locked = prefs.getBoolean(KEY_FCL_ALWAYS, false);
+            if (!locked) {
+                toggleFclControllerOverlay();
+            } else if (locked && (fclControllerView == null
+                    || fclControllerView.getVisibility() != View.VISIBLE)) {
+                applyFclPrefs();
+            }
+            return;
+        }
         if (mRoot != null && mRoot.hasPointerCapture()) {
             releasePointerCapture(true);
             // There is no KeyEvent on this OEM path. Use a wildcard so a trailing
@@ -2283,6 +2689,11 @@ public class MainActivity extends Activity
         {MotionEvent.BUTTON_BACK,      0x113}, // BTN_SIDE
         {MotionEvent.BUTTON_FORWARD,   0x114}, // BTN_EXTRA
     };
+
+    /** Notch-like wheel values get a discrete step; fractional (touchpad) deltas stay continuous. */
+    private static int discreteOf(float value) {
+        return Math.abs(value) >= 1f ? (int) Math.signum(value) : 0;
+    }
 
     private void updateMouseButtonState(int currentBS) {
         for (int[] btn : BUTTON_MAP) {

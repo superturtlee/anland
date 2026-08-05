@@ -24,14 +24,28 @@ package com.anland.consumer;
      private static final String TAG = "VirtualKeyboard"; 
   
      // ---------- 最终键盘布局 ---------- 
-     private final String[][] keyboardRows = { 
-             {"ESC", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"}, 
-             {"`", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", "⌫"}, 
-             {"Tab", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "[", "]", "\\"}, 
-             {"Caps", "A", "S", "D", "F", "G", "H", "J", "K", "L", ";", "'", "Enter"}, 
-             {"Shift", "Z", "X", "C", "V", "B", "N", "M", ",", "↑", ".", "/", "Shift"},   // ↑ 在 . 前面 
-             {"Ctrl", "Alt", "Space", "Alt", "Home", "←", "↓", "→", "End", "Ctrl"} 
-     }; 
+    // 横屏布局：完整功能键 + 主键盘区。
+    private final String[][] landscapeKeyboardRows = { 
+            {"ESC", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"}, 
+            {"`", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", "⌫"}, 
+            {"Tab", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "[", "]", "\\"}, 
+            {"Caps", "A", "S", "D", "F", "G", "H", "J", "K", "L", ";", "'", "Enter"}, 
+            {"Shift", "Z", "X", "C", "V", "B", "N", "M", ",", "↑", ".", "/", "Shift"},   // ↑ 在 . 前面 
+            {"Ctrl", "Alt", "Space", "Alt", "Home", "←", "↓", "→", "End", "Ctrl"} 
+    }; 
+
+    // 竖屏布局：紧凑 5 行，适配窄屏。
+    private final String[][] portraitKeyboardRows = {
+            {"Esc", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "⌫"},
+            {"Tab", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "[", "]"},
+            {"Caps", "A", "S", "D", "F", "G", "H", "J", "K", "L", ";", "'", "Enter"},
+            {"Shift", "Z", "X", "C", "V", "B", "N", "M", ",", ".", "/", "Shift"},
+            {"Ctrl", "Alt", "←", "↑", "↓", "→", "Space"}
+    };
+
+    // 当前生效的布局（按屏幕方向切换）。
+    private String[][] keyboardRows = landscapeKeyboardRows;
+    private boolean portraitMode = false;
   
      // ---------- 符号映射表 ---------- 
      private static final Map<String, String> SYMBOL_CHAR_MAP = new HashMap<>(); 
@@ -104,11 +118,13 @@ package com.anland.consumer;
          void onKeyUp(int scanCode); 
      } 
   
-     public VirtualKeyboardView(Context context) { 
-         super(context); 
-         dragHandleHeight = dpToPx(20); 
-         updateScreenSize(); 
-         initKeys(); 
+    public VirtualKeyboardView(Context context) { 
+        super(context); 
+        dragHandleHeight = dpToPx(20); 
+        updateScreenSize(); 
+        portraitMode = isPortrait();
+        keyboardRows = activeRows();
+        initKeys(); 
          initPaints(); 
          setFocusable(true); 
          setFocusableInTouchMode(true); 
@@ -116,7 +132,7 @@ package com.anland.consumer;
          bringToFront(); 
      } 
   
-     private void updateScreenSize() {
+    private void updateScreenSize() {
         try {
             // Prefer parent view dimensions (correct in freeform / small-window mode).
             ViewParent pp = getParent();
@@ -142,6 +158,30 @@ package com.anland.consumer;
             screenHeight = 1080;
         }
     } 
+
+    private boolean isPortrait() {
+        return screenHeight > screenWidth;
+    }
+
+    private String[][] activeRows() {
+        return portraitMode ? portraitKeyboardRows : landscapeKeyboardRows;
+    }
+
+    // 屏幕方向变化时重建按键列表（Activity 自行处理 configChanges，不会重启）。
+    private void syncOrientation() {
+        boolean nowPortrait = isPortrait();
+        if (nowPortrait == portraitMode) {
+            return;
+        }
+        portraitMode = nowPortrait;
+        keyboardRows = activeRows();
+        keys.clear();
+        initKeys();
+        applySymbolLayer();
+        invalidate();
+        Log.d(TAG, "orientation switched to " + (portraitMode ? "portrait" : "landscape")
+                + ", keys=" + keys.size());
+    }
   
      @Override 
      protected void onAttachedToWindow() { 
@@ -223,24 +263,23 @@ package com.anland.consumer;
          for (int r = 0; r < keyboardRows.length; r++) { 
              String[] row = keyboardRows[r]; 
              for (int c = 0; c < row.length; c++) { 
-                 String rawLabel = row[c]; 
-                 String internalLabel = rawLabel; 
-                 if (rawLabel.equals("Shift")) { 
-                     if (r == 4) { 
-                         if (c == 0) internalLabel = "ShiftL"; 
-                         else if (c == row.length - 1) internalLabel = "ShiftR"; 
-                     } 
-                 } else if (rawLabel.equals("Ctrl")) { 
-                     if (r == 5) { 
-                         if (c == 0) internalLabel = "CtrlL"; 
-                         else if (c == row.length - 1) internalLabel = "CtrlR"; 
-                     } 
-                 } else if (rawLabel.equals("Alt")) { 
-                     if (r == 5) { 
-                         if (c == 1) internalLabel = "AltL"; 
-                         else if (c == 3) internalLabel = "AltR"; 
-                     } 
-                 } 
+                String rawLabel = row[c]; 
+                String internalLabel = rawLabel; 
+                if (rawLabel.equals("Shift")) { 
+                    int first = firstIndexOf(row, "Shift");
+                    int last = lastIndexOf(row, "Shift");
+                    if (c == first) internalLabel = "ShiftL";
+                    else if (c == last) internalLabel = "ShiftR";
+                } else if (rawLabel.equals("Ctrl")) { 
+                    int first = firstIndexOf(row, "Ctrl");
+                    int last = lastIndexOf(row, "Ctrl");
+                    if (c == first) internalLabel = "CtrlL";
+                    else if (c == last) internalLabel = "CtrlR";
+                } else if (rawLabel.equals("Alt")) { 
+                    int first = firstIndexOf(row, "Alt");
+                    if (c == first) internalLabel = "AltL";
+                    else internalLabel = "AltR";
+                } 
   
                  String displayLabel; 
                  if (internalLabel.startsWith("Shift")) displayLabel = "Shift"; 
@@ -264,8 +303,22 @@ package com.anland.consumer;
                  keys.add(k); 
              } 
          } 
-         Log.d(TAG, "Keys initialized: " + keys.size()); 
-     } 
+        Log.d(TAG, "Keys initialized: " + keys.size()); 
+    } 
+
+    private static int firstIndexOf(String[] row, String label) {
+        for (int i = 0; i < row.length; i++) {
+            if (row[i].equals(label)) return i;
+        }
+        return -1;
+    }
+
+    private static int lastIndexOf(String[] row, String label) {
+        for (int i = row.length - 1; i >= 0; i--) {
+            if (row[i].equals(label)) return i;
+        }
+        return -1;
+    }
   
      private int getKeyCodeForLabel(String label) { 
          switch (label) { 
@@ -383,13 +436,16 @@ package com.anland.consumer;
         try {
             // Refresh screen size so freeform / resize is picked up.
             updateScreenSize();
-            int desiredWidth = (int) (screenWidth * 0.45f);
+            syncOrientation();
+            boolean portrait = isPortrait();
+            // 竖屏时键盘加宽到屏幕的 94%，横屏保持 45%。
+            int desiredWidth = (int) (screenWidth * (portrait ? 0.94f : 0.45f));
             if (desiredWidth < 400) desiredWidth = 400;
             // In freeform mode the keyboard must not exceed the parent width.
             int maxWidth = MeasureSpec.getSize(widthMeasureSpec);
             if (maxWidth > 0 && desiredWidth > maxWidth) desiredWidth = maxWidth;
             int rowCount = keyboardRows.length;
-            int keyH = dpToPx(32);
+            int keyH = dpToPx(portrait ? 26 : 32);
             int totalHeight = dragHandleHeight + padding + rowCount * (keyH + padding) + padding;
             if (totalHeight <= 0) totalHeight = 350;
             setMeasuredDimension(desiredWidth, totalHeight);
@@ -404,6 +460,7 @@ package com.anland.consumer;
      protected void onSizeChanged(int w, int h, int oldw, int oldh) { 
          super.onSizeChanged(w, h, oldw, oldh); 
          updateScreenSize(); 
+         syncOrientation();
          try { 
              layoutKeys(w, h); 
              post(this::setInitialPosition); 

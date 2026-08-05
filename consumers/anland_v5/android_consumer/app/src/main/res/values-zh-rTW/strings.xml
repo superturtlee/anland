@@ -11,6 +11,7 @@
     <string name="section_connection">連線</string>
     <string name="section_resolution">顯示解析度</string>
     <string name="section_notification">設定通知</string>
+    <string name="section_fcl_controller">FCL 控制器</string>
 
     <!-- Settings home: category rows and back navigation -->
     <string name="nav_back">‹ 返回</string>
@@ -65,6 +66,24 @@
         <item>不顯示</item>
         <item>隨軟鍵盤顯示</item>
     </string-array>
+    <string name="fcl_controller_label">控制器</string>
+    <string name="fcl_controller_hint">以覆蓋層顯示 FoldCraftLauncher 的控制器佈局（來自 FCL-Controllers 專案），按鈕與搖桿會轉換成桌面的按鍵/滑鼠輸入。隨時可用擴充按鍵列裡的 FCL 鍵開關。</string>
+    <string name="bottom_overlay_label">覆蓋層控件</string>
+    <string-array name="bottom_overlay_options">
+        <item>原版擴充按鍵列</item>
+        <item>FCL 控制器</item>
+    </string-array>
+    <string name="bottom_overlay_hint">選擇覆蓋層控件：原版擴充按鍵列或 FCL 控制器。選擇 FCL 控制器後，底部擴充按鍵列會隱藏。</string>
+    <string name="fcl_always_switch">始終鎖定覆蓋層在前景</string>
+    <string name="fcl_always_hint">開啟後 FCL 覆蓋層保持顯示，返回鍵無法隱藏；關閉後由返回鍵顯示/隱藏。</string>
+    <string name="fcl_import">匯入</string>
+    <string name="fcl_export">匯出</string>
+    <string name="fcl_import_done">控制器已匯入</string>
+    <string name="fcl_import_invalid">無效的 FCL 控制器檔案</string>
+    <string name="fcl_export_done">控制器已匯出</string>
+    <string name="fcl_export_failed">匯出失敗</string>
+    <string name="fcl_reset_layout">重置佈局位置</string>
+    <string name="fcl_reset_done">佈局位置已重置</string>
     <string name="back_opens_switch">返回鍵快速切換擴充按鍵列</string>
     <string name="back_opens_hint">開啟時，在擴充按鍵列隱藏狀態下按返回鍵會顯示它，再次按返回鍵則隱藏。</string>
     <string name="keyboard_floating_switch">鍵盤懸浮（覆蓋顯示區域）</string>

@@ -39,6 +39,7 @@
             android:exported="true"
             android:enableOnBackInvokedCallback="false"
             android:screenOrientation="fullUser"
+            android:windowSoftInputMode="adjustNothing"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:launchMode="singleTask"
             android:resizeableActivity="true">
@@ -59,6 +60,7 @@
             android:exported="true"
             android:enableOnBackInvokedCallback="false"
             android:screenOrientation="fullUser"
+            android:windowSoftInputMode="adjustNothing"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:launchMode="standard"
             android:documentLaunchMode="always"
@@ -69,7 +71,7 @@
             android:name=".SettingsActivity"
             android:exported="true"
             android:enableOnBackInvokedCallback="false"
-            android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+            android:theme="@style/AnlandSettingsTheme">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
             </intent-filter>

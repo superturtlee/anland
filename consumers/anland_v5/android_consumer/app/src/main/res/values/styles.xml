@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Full-window transparent host used by the controller editor.  The
+         visible card is centered inside this window, so system insets and
+         freeform-window offsets can never crop its rounded corners. -->
+    <style name="AnlandEditorDialog" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentTransitions">false</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#3478F6</item>
+    </style>
+
+    <!-- Shared surface for the complete Anland settings flow. Individual rows are
+         drawn in SettingsActivity so they match the FCL controller editor rather
+         than inheriting the older DeviceDefault preference widgets. -->
+    <style name="AnlandSettingsTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">#F2F5FA</item>
+        <item name="android:colorAccent">#3478F6</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

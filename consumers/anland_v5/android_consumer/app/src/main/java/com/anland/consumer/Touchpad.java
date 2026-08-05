@@ -72,6 +72,10 @@ public final class Touchpad {
     private boolean isSingleTapCandidate = false;
     private boolean isTwoFingerTapCandidate = false;
     private boolean isDraggingActive = false;
+    // Set once a one-finger contact has clearly travelled past touchSlop. Until
+    // then a tap must emit no motion; after that every MOVE is emitted so slow
+    // drags stay smooth instead of chunking on the threshold.
+    private boolean oneFingerMoved = false;
 
     private long lastTapTime = 0;
     private float lastTapX, lastTapY;
@@ -458,6 +462,7 @@ public final class Touchpad {
                 float y = event.getY();
                 startX1 = lastX1 = x;
                 startY1 = lastY1 = y;
+                oneFingerMoved = false;
                 downTime1 = event.getEventTime();
                 hasLongPressed = false;
                 isLongPressPossible = true;
@@ -472,6 +477,7 @@ public final class Touchpad {
             }
             case MotionEvent.ACTION_POINTER_DOWN: {
                 isMultiFinger = true;
+                oneFingerMoved = false;
                 isSingleTapCandidate = false;
                 isLongPressPossible = false;
                 if (currentState == STATE_DRAGGING) {
@@ -496,11 +502,23 @@ public final class Touchpad {
                 if (pointerCount == 1 && !isMultiFinger) {
                     float x = event.getX();
                     float y = event.getY();
-                    float rawDx = x - lastX1;
-                    float rawDy = y - lastY1;
                     float dist = (float) Math.hypot(x - startX1, y - startY1);
 
-                    if (dist > touchSlop) {
+                    // Only a contact that has clearly travelled counts as
+                    // movement. A tap (finger down/up inside touchSlop) must not
+                    // move the host cursor at all: its micro-jitter would
+                    // otherwise be delivered as mouse motion right before the
+                    // click and drift the camera in games.
+                    boolean movedBeyondSlop = dist > touchSlop;
+                    if (movedBeyondSlop && !oneFingerMoved) {
+                        // Confirmed movement: drop the pre-slop travel so the
+                        // cursor starts moving smoothly from the current spot.
+                        oneFingerMoved = true;
+                        lastX1 = x;
+                        lastY1 = y;
+                        resetSmoothing();
+                    }
+                    if (movedBeyondSlop) {
                         isLongPressPossible = false;
                         isSingleTapCandidate = false;
                         // Cleared once the remaining finger actually moves, so a
@@ -521,26 +539,29 @@ public final class Touchpad {
                         break;
                     }
 
-                    float[] smoothed = applySmoothing(rawDx, rawDy);
-                    float smoothDx = smoothed[0];
-                    float smoothDy = smoothed[1];
+                    if (oneFingerMoved) {
+                        float rawDx = x - lastX1;
+                        float rawDy = y - lastY1;
+                        float[] smoothed = applySmoothing(rawDx, rawDy);
+                        float smoothDx = smoothed[0];
+                        float smoothDy = smoothed[1];
 
-                    if (smoothDx != 0f || smoothDy != 0f) {
-                        // 计算移动距离（平滑后的欧式距离）
-                        float distance = (float) Math.hypot(smoothDx, smoothDy);
+                        if (smoothDx != 0f || smoothDy != 0f) {
+                            // 计算移动距离（平滑后的欧式距离）
+                            float distance = (float) Math.hypot(smoothDx, smoothDy);
 
-                        // 改进的加速度曲线：以 10px 为参考阈值，使小位移也能获得明显加速
-                        float speedFactor = distance / 10.0f;
-                        // 使用 sigmoid-like 曲线：scale = 1 + (strength - 1) * (speed / (1 + speed))
-                        float dynamicScale = 1.0f + (mouseAccelStrength - 1.0f) * (speedFactor / (1.0f + speedFactor));
-                        // 限制范围，防止失控（最大不超过 10 倍）
-                        dynamicScale = Math.max(0.3f, Math.min(10.0f, dynamicScale));
+                            // 改进的加速度曲线：以 10px 为参考阈值，使小位移也能获得明显加速
+                            float speedFactor = distance / 10.0f;
+                            // 使用 sigmoid-like 曲线：scale = 1 + (strength - 1) * (speed / (1 + speed))
+                            float dynamicScale = 1.0f + (mouseAccelStrength - 1.0f) * (speedFactor / (1.0f + speedFactor));
+                            // 限制范围，防止失控（最大不超过 10 倍）
+                            dynamicScale = Math.max(0.3f, Math.min(10.0f, dynamicScale));
 
-                        float moveX = smoothDx * dynamicScale;
-                        float moveY = smoothDy * dynamicScale;
-                        sendMotion(moveX, moveY);
+                            float moveX = smoothDx * dynamicScale;
+                            float moveY = smoothDy * dynamicScale;
+                            sendMotion(moveX, moveY);
+                        }
                     }
-
                     lastX1 = x;
                     lastY1 = y;
 
@@ -598,6 +619,7 @@ public final class Touchpad {
                 int remaining = pointerCount - 1;
                 if (remaining == 1) {
                     isMultiFinger = false;
+                    oneFingerMoved = false;
                     isSingleTapCandidate = false;
                     isLongPressPossible = false;
                     int idx = (event.getActionIndex() == 0) ? 1 : 0;
@@ -814,6 +836,7 @@ public final class Touchpad {
         isDraggingActive = false;
         isLongPressPossible = false;
         isMultiFinger = false;
+        oneFingerMoved = false;
         twoFingerMode = TWO_FINGER_UNDECIDED;
         // Cleared here rather than in declineGesture: the latch has to outlive the
         // events that follow it and only lifts when the gesture itself ends.

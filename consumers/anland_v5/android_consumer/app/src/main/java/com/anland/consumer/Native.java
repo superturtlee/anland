@@ -45,7 +45,8 @@ public final class Native {
     public void sendKey(int action, int keycode) { nativeSendKey(handle, action, keycode); }
     public void sendMouseMotion(float x, float y, float dx, float dy) { nativeSendMouseMotion(handle, x, y, dx, dy); }
     public void sendMouseButton(int button, boolean pressed) { nativeSendMouseButton(handle, button, pressed); }
-    public void sendMouseScroll(int axis, float value) { nativeSendMouseScroll(handle, axis, value); }
+    public void sendMouseScroll(int axis, float value) { nativeSendMouseScroll(handle, axis, value, 0); }
+    public void sendMouseScroll(int axis, float value, int discrete) { nativeSendMouseScroll(handle, axis, value, discrete); }
     public void setRefreshRate(float hz) { nativeSetRefreshRate(handle, hz); }
     public void sendClipboard(byte[] data) { nativeSendClipboard(handle, data); }
     public void sendTextInput(byte[] data) { nativeSendTextInput(handle, data); }
@@ -77,7 +78,7 @@ public final class Native {
     private static native void nativeSendKey(long handle, int action, int keycode);
     private static native void nativeSendMouseMotion(long handle, float x, float y, float dx, float dy);
     private static native void nativeSendMouseButton(long handle, int button, boolean pressed);
-    private static native void nativeSendMouseScroll(long handle, int axis, float value);
+    private static native void nativeSendMouseScroll(long handle, int axis, float value, int discrete);
     private static native void nativeSetRefreshRate(long handle, float hz);
     private static native void nativeSendClipboard(long handle, byte[] data);
     private static native void nativeSendTextInput(long handle, byte[] data);
