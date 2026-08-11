@@ -131,6 +131,9 @@
     <string name="camera_hint">Lets the desktop open this device\'s camera(s) as a video source. The camera only turns on while the desktop is actively recording. Takes effect on next return to the app; first use prompts for the camera permission.</string>
     <string name="audio_keepalive_switch">Audio keep-alive</string>
     <string name="audio_keepalive_hint">Keep the audio output stream running so short Linux sounds (volume ticks, key clicks) always play instantly. Costs a little standby power. Off: the audio path sleeps after ~1.5 s of desktop silence and wakes for the next sound. If the audible latency does not match your preference, you may need to tune the Audio latency presets below.</string>
+    <string name="audio_effects_switch">System audio effects (Dolby Atmos etc.)</string>
+    <string name="audio_effects_hint">Route desktop audio through the phone\'s system effects chain (e.g. Dolby). Off: direct low-latency output that bypasses system effects. The change applies immediately.</string>
+    <string name="audio_effects_latency_hint">System audio effects are on: the speaker latency preset is ignored (the phone\'s effects chain controls buffering). Microphone latency is unaffected.</string>
     <string name="audio_latency_title">Audio latency</string>
     <string name="latency_speaker_label">Speaker (desktop → phone)</string>
     <string name="latency_mic_label">Microphone (phone → desktop)</string>

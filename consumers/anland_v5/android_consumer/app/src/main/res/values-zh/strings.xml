@@ -131,6 +131,9 @@
     <string name="camera_hint">允许桌面将本设备的摄像头作为视频源打开。仅在桌面正在录制时摄像头才会开启。下次返回应用时生效；首次使用会请求摄像头权限。</string>
     <string name="audio_keepalive_switch">音频保活</string>
     <string name="audio_keepalive_hint">保持音频输出流持续活跃，让 Linux 的短促系统音（音量提示、按键音）始终即时播放；会略增待机功耗。关闭时桌面静默约1.5秒后音频通路自动休眠，下次出声时自动唤醒。开启后若听感延迟不合预期，可能需要配合调整下方的「音频延迟」预设。</string>
+    <string name="audio_effects_switch">使用系统音效（杜比全景声等）</string>
+    <string name="audio_effects_hint">桌面音频走手机系统音效链（杜比等）；关闭为低延时直出，绕过系统音效。改动即时生效。</string>
+    <string name="audio_effects_latency_hint">已开启系统音效：扬声器延时预设不生效（由手机音效链路决定缓冲）。麦克风延时不受影响。</string>
     <string name="audio_latency_title">音频延迟</string>
     <string name="latency_speaker_label">扬声器（桌面 → 手机）</string>
     <string name="latency_mic_label">麦克风（手机 → 桌面）</string>

@@ -119,6 +119,9 @@
     <string name="camera_hint">允許桌面將本裝置的相機作為視訊來源開啟。僅在桌面正在錄製時相機才會開啟。下次返回應用程式時生效；首次使用會請求相機權限。</string>
     <string name="audio_keepalive_switch">音訊保活</string>
     <string name="audio_keepalive_hint">保持音訊輸出串流持續活躍，讓 Linux 的短促系統音（音量提示、按鍵音）始終即時播放；會略增待機耗電。關閉時桌面靜默約 1.5 秒後音訊路徑自動休眠，下次出聲時自動喚醒。開啟後若聽感延遲不合預期，可能需要配合調整下方的「音訊延遲」預設。</string>
+    <string name="audio_effects_switch">使用系統音效（杜比全景聲等）</string>
+    <string name="audio_effects_hint">桌面音訊走手機系統音效鏈（杜比等）；關閉為低延遲直出，繞過系統音效。改動即時生效。</string>
+    <string name="audio_effects_latency_hint">已開啟系統音效：揚聲器延遲預設不生效（由手機音效鏈路決定緩衝）。麥克風延遲不受影響。</string>
     <string name="audio_latency_title">音訊延遲</string>
     <string name="latency_speaker_label">喇叭（桌面 → 手機）</string>
     <string name="latency_mic_label">麥克風（手機 → 桌面）</string>

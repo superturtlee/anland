@@ -54,4 +54,10 @@ void audio_set_latency(audio_bridge *b, int speaker_ms, int mic_ms);
  * Default is disabled. Takes effect on the playback thread's next loop pass. */
 void audio_set_keepalive(audio_bridge *b, int enabled);
 
+/* Route the playback stream through the phone's system effects chain (e.g. Dolby
+ * Atmos) instead of the direct MMAP output. Default off (direct, lowest latency).
+ * Reopens the output stream on the playback thread so the change applies
+ * immediately. */
+void audio_set_effects(audio_bridge *b, int enabled);
+
 #endif

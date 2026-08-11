@@ -64,6 +64,9 @@ public class MainActivity extends Activity
     static final String KEY_MIC_LATENCY_MS = "mic_latency_ms";
     // Audio keep-alive toggle. Shared with SettingsActivity.
     static final String KEY_AUDIO_KEEPALIVE = "audio_keepalive";
+    // Route desktop audio through system effects (Dolby etc.). Shared with
+    // SettingsActivity.
+    static final String KEY_AUDIO_EFFECTS = "audio_effects";
     private static final int REQ_RECORD_AUDIO = 1001;
     private static final int REQ_CAMERA = 1002;
     // Camera service fds/threads are created once and persist across reconnects;
@@ -1823,6 +1826,7 @@ public class MainActivity extends Activity
             applyMicState();
             applyAudioLatency();
             applyAudioKeepalive();
+            applyAudioEffects();
         }
 
         // ===== 重新读取触摸板设置 =====
@@ -1952,6 +1956,11 @@ public class MainActivity extends Activity
         mNative.setAudioKeepalive(prefs.getBoolean(KEY_AUDIO_KEEPALIVE, false));
     }
 
+    private void applyAudioEffects() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        mNative.setAudioEffects(prefs.getBoolean(KEY_AUDIO_EFFECTS, false));
+    }
+
     private void applyMicState() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         boolean want = prefs.getBoolean(KEY_MIC_ENABLED, false);
@@ -2013,6 +2022,7 @@ public class MainActivity extends Activity
         applyMicState();
         applyAudioLatency();
         applyAudioKeepalive();
+        applyAudioEffects();
 
         // ===== 更新屏幕尺寸并重置平滑状态 =====
         updateTouchpadBounds(null);

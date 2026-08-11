@@ -67,6 +67,7 @@ public class SettingsActivity extends Activity {
     private static final String KEY_MIC_ENABLED = "mic_enabled";
     private static final String KEY_CAMERA_ENABLED = "camera_enabled";
     private static final String KEY_AUDIO_KEEPALIVE = "audio_keepalive";
+    private static final String KEY_AUDIO_EFFECTS = "audio_effects";
     private static final String KEY_SPEAKER_LATENCY_MS = "speaker_latency_ms";
     private static final String KEY_MIC_LATENCY_MS = "mic_latency_ms";
     private static final String KEY_ACCESSIBILITY_ENABLED = "accessibility_key_intercept";
@@ -104,6 +105,11 @@ public class SettingsActivity extends Activity {
 
     // Which profile the six FCL action buttons operate on.
     private String manageTarget = "landscape";   // "landscape" / "portrait"
+
+    // Speaker latency row + card hint, used by the system-effects toggle to grey
+    // out the preset while Dolby-style effects route playback.
+    private LinearLayout speakerLatencyBox;
+    private TextView latencyHintView;
 
     // ===== 新增：触摸板 Key =====
     private static final String KEY_TOUCHPAD_MODE = "touchpad_mode";
@@ -1526,14 +1532,29 @@ public class SettingsActivity extends Activity {
                 .putBoolean(KEY_AUDIO_KEEPALIVE, checked).apply());
         runtimeCard.addView(fclSwitchRow(getString(R.string.audio_keepalive_switch),
                 getString(R.string.audio_keepalive_hint), keepaliveSwitch));
+        addFclDivider(runtimeCard);
+
+        Switch effectsSwitch = new Switch(this);
+        effectsSwitch.setChecked(prefs.getBoolean(KEY_AUDIO_EFFECTS, false));
+        effectsSwitch.setOnCheckedChangeListener((v, checked) -> {
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                .putBoolean(KEY_AUDIO_EFFECTS, checked).apply();
+            applyEffectsLatencyUi();
+        });
+        runtimeCard.addView(fclSwitchRow(getString(R.string.audio_effects_switch),
+                getString(R.string.audio_effects_hint), effectsSwitch));
 
         LinearLayout latencyCard = addSettingsCard(root, getString(R.string.audio_latency_title),
                 getString(R.string.latency_hint));
 
-        latencyCard.addView(makeLatencySpinner(getString(R.string.latency_speaker_label),
-                                        KEY_SPEAKER_LATENCY_MS, prefs));
+        View speakerView = makeLatencySpinner(getString(R.string.latency_speaker_label),
+                                        KEY_SPEAKER_LATENCY_MS, prefs);
+        latencyCard.addView(speakerView);
+        speakerLatencyBox = (LinearLayout) speakerView;
         latencyCard.addView(makeLatencySpinner(getString(R.string.latency_mic_label),
                                         KEY_MIC_LATENCY_MS, prefs));
+        latencyHintView = (TextView) latencyCard.getChildAt(1);
+        applyEffectsLatencyUi();
     }
 
     private void addResolutionSection(LinearLayout root) {
@@ -1686,6 +1707,28 @@ public class SettingsActivity extends Activity {
         });
         box.addView(sp);
         return box;
+    }
+
+    /** System effects are on: the speaker latency preset is bypassed (the phone's
+     *  effects chain controls buffering), so grey the row out and explain it.
+     *  The microphone preset stays untouched. */
+    private void applyEffectsLatencyUi() {
+        if (speakerLatencyBox == null || latencyHintView == null) return;
+        boolean effects = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .getBoolean(KEY_AUDIO_EFFECTS, false);
+        setLatencyBoxEnabled(speakerLatencyBox, !effects);
+        latencyHintView.setText(effects
+            ? getString(R.string.audio_effects_latency_hint)
+            : getString(R.string.latency_hint));
+    }
+
+    private void setLatencyBoxEnabled(LinearLayout box, boolean enabled) {
+        box.setEnabled(enabled);
+        for (int i = 0; i < box.getChildCount(); i++) {
+            View child = box.getChildAt(i);
+            child.setEnabled(enabled);
+            child.setAlpha(enabled ? 1.0f : 0.35f);
+        }
     }
 
     /** Stop whichever row is counting down, leaving its binding untouched. */

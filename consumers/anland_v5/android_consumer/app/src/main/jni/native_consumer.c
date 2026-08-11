@@ -1104,3 +1104,13 @@ Java_com_anland_consumer_Native_nativeSetAudioKeepalive(
         return;
     audio_set_keepalive(s->audio, enabled == JNI_TRUE);
 }
+
+JNIEXPORT void JNICALL
+Java_com_anland_consumer_Native_nativeSetAudioEffects(
+    JNIEnv *env, jclass clazz, jlong handle, jboolean enabled)
+{
+    struct consumer_state *s = STATE(handle);
+    if (!s)
+        return;
+    audio_set_effects(s->audio, enabled == JNI_TRUE);
+}
