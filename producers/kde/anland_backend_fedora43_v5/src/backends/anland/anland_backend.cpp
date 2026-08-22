@@ -161,8 +161,17 @@ bool AnlandBackend::initialize()
     // so Linux apps never see the devices appear/disappear as the consumer comes and
     // goes. The socket fd is attached later (onReconnectTimer) and detached in
     // enterFallback(). Audio is non-critical, so a failure here is not fatal.
-    if (anland_audio_start() < 0) {
+    //
+    // ANLAND_DISABLE_AUDIO=1 skips the audio engine entirely: the anland-audio
+    // PipeWire thread-loop (and the anland-speaker/anland-mic virtual devices) is
+    // never created. Used to sidestep a busy-loop on this platform until the
+    // underlying cause is fixed upstream. The backend simply reports no audio.
+    const bool disableAudio = qEnvironmentVariableIsSet("ANLAND_DISABLE_AUDIO")
+        && qEnvironmentVariableIntValue("ANLAND_DISABLE_AUDIO") != 0;
+    if (!disableAudio && anland_audio_start() < 0) {
         qCWarning(KWIN_ANLAND) << "failed to start audio engine; continuing without audio";
+    } else if (disableAudio) {
+        qCInfo(KWIN_ANLAND) << "anland audio engine disabled by ANLAND_DISABLE_AUDIO";
     }
 
     // The camera engine is NOT started here: its PipeWire thread-loop is brought up
