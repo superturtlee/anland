@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_short_label">설정</string>
+
+    <!-- Titles / section headers -->
+    <string name="settings_title">설정</string>
+    <string name="section_virtual_keyboard">소프트 키보드 전환 키</string>
+    <string name="section_extra_keys">추가 키 바</string>
+    <string name="section_custom_layout">커스텀 추가 키 레이아웃</string>
+    <string name="section_touchpad">터치패드 설정</string>
+    <string name="section_connection">연결</string>
+    <string name="section_resolution">디스플레이 해상도</string>
+    <string name="section_notification">설정 알림</string>
+
+    <!-- Settings home: category rows and back navigation -->
+    <string name="nav_back">‹ 뒤로</string>
+    <string name="cat_keyboard_title">키보드 및 키</string>
+    <string name="cat_keyboard_subtitle">키 바인딩, 몰입 모드, 접근성 및 추가 키 바</string>
+    <string name="cat_touchpad_title">터치패드 및 마우스</string>
+    <string name="cat_touchpad_subtitle">터치패드 모드, 포인터 캡처 및 감도</string>
+    <string name="cat_connection_subtitle">소켓, 루트, 마이크, 카메라 및 오디오 지연시간</string>
+    <string name="cat_resolution_subtitle">출력 해상도 및 프리셋</string>
+    <string name="cat_general_title">일반</string>
+    <string name="cat_general_subtitle">화면 방향 및 설정 알림</string>
+
+    <!-- Screen orientation -->
+    <string name="section_orientation">화면 방향</string>
+    <string name="orientation_label">화면 방향 강제 설정</string>
+    <string-array name="orientation_options">
+        <item>기본값 (시스템)</item>
+        <item>가로 모드 강제</item>
+        <item>세로 모드 강제</item>
+    </string-array>
+
+    <!-- Bind key -->
+    <string name="bind_key_button">소프트 키보드 전환 키 바인딩</string>
+    <string name="raise_desktop_for_soft_keyboard">소프트 키보드가 열리면 데스크톱 올리기</string>
+    <string name="raise_desktop_for_soft_keyboard_hint">이 옵션을 켜면 데스크톱 화면이 줄어들고 위로 이동하여 입력 중인 내용을 볼 수 있습니다.</string>
+    <string name="listening_countdown">키 입력 대기 중… (%1$d초)</string>
+    <string name="status_current_none">현재: 없음</string>
+    <string name="status_current">현재: %1$s</string>
+    <string name="status_current_no_scancode">현재: %1$s — 이 키는 스캔 코드를 보고하지 않아 몰입 모드에서 사용할 수 없습니다. 볼륨 업과 같은 하드웨어 키를 바인딩하세요.</string>
+    <string name="keycode_unknown">키코드 %1$d</string>
+    <string name="scancode_unknown">스캔 코드 %1$d</string>
+
+    <!-- Immersive mode -->
+    <string name="section_immersive">몰입 모드 (실험적)</string>
+    <string name="immersive_switch">몰입 모드 사용 (실험적)</string>
+    <string name="immersive_hint">터치, 키보드, 마우스 입력을 안드로이드 제스처를 거치지 않고 리눅스 데스크톱으로 직접 전송합니다. 루트 권한이 필요합니다. 아래에서 전환 키를 설정하세요: 한 번 누르면 진입하고, 다시 누르면 종료됩니다. 앱을 전환해도 이 모드는 종료됩니다.</string>
+    <string name="bind_immersive_key_button">몰입 모드 키 바인딩</string>
+    <string name="immersive_entering">몰입 모드: 모든 입력이 데스크톱으로 전달됩니다. %1$s 키를 다시 누르면 종료됩니다.</string>
+    <string name="immersive_exited">몰입 모드 꺼짐</string>
+    <string name="immersive_no_scancode">먼저 몰입 모드용 키를 바인딩하세요</string>
+    <string name="immersive_failed">몰입 모드를 시작할 수 없습니다: 루트 권한이 거부되었거나 사용할 수 없습니다</string>
+    <string name="immersive_no_devices">몰입 모드를 시작할 수 없습니다: 입력 장치를 가져올 수 없습니다</string>
+    <string name="immersive_interrupted">몰입 모드가 종료되어 입력이 안드로이드로 반환되었습니다</string>
+
+    <!-- Accessibility -->
+    <string name="accessibility_switch">접근성 키 가로채기</string>
+    <string name="accessibility_hint">AccessibilityService를 통해 기능 키(Fn, F1-F12 등)를 가로채고, 태블릿 키보드의 뒤로가기/브라우저 뒤로가기를 ESC로 변환합니다. 외부 키보드의 Fn 조합이나 ESC가 데스크톱에 제대로 전달되지 않는다면 이 옵션을 활성화하세요. 시스템 설정 &gt; 접근성에서 접근성 권한을 한 번 허용해야 합니다.</string>
+
+    <!-- Extra keys bar -->
+    <string name="extra_keys_mode_label">추가 키 바 모드</string>
+    <string name="extra_keys_mode_hint">ESC/TAB/CTRL/ALT/방향키/PgUp 등이 있는 Termux 스타일 하단 바를 언제 표시할지 설정합니다. 데스크톱 화면으로 다음에 돌아갈 때 적용됩니다.</string>
+    <string-array name="extra_keys_mode_options">
+        <item>항상 표시</item>
+        <item>표시 안 함</item>
+        <item>소프트 키보드와 함께 표시</item>
+    </string-array>
+    <string name="back_opens_switch">뒤로가기 키로 추가 키 바 빠르게 전환</string>
+    <string name="back_opens_hint">켜면, 추가 키 바가 숨겨진 상태에서 뒤로가기를 누르면 표시되고, 다시 누르면 숨겨집니다.</string>
+    <!-- Custom layout editor -->
+    <string name="btn_load_default">기본 템플릿 불러오기</string>
+    <string name="btn_load_file">파일에서 불러오기…</string>
+    <string name="layout_hint">추가 키 바를 JSON으로 정의하세요: "rows"는 행의 배열이며, 각 행은 키의 배열입니다. 키는 "label"과 "type"(key/text/modifier/keyboard/vkeyboard/settings)을 가집니다. "key"/"modifier"는 evdev "code"를, "text"는 "text"를 사용합니다. 모든 키에 "repeat":true를 추가하거나 중첩된 "popup"을 넣을 수 있습니다. 잘못된 JSON은 기본값으로 대체됩니다. 데스크톱 화면으로 다음에 돌아갈 때 적용됩니다.</string>
+    <string name="layout_status_default">내장 기본 레이아웃 사용 중</string>
+    <string name="layout_status_valid">✓ 유효한 레이아웃</string>
+    <string name="layout_status_invalid">✗ %1$s</string>
+
+    <!-- Touchpad -->
+    <string name="touchpad_mode_switch">터치패드 모드 (상대 좌표 이동)</string>
+    <string name="touchpad_hint">켜짐: 손가락을 움직이면 마우스 커서가 이동합니다 (상대 좌표). 꺼짐: 터치한 위치가 화면 좌표에 그대로 대응됩니다 (절대 좌표).</string>
+    <string name="pointer_capture_switch">외부 포인터 캡처</string>
+    <string name="pointer_capture_hint">외부 마우스나 터치패드를 데스크톱 화면에 고정하고 상대 좌표 이동을 사용하므로, 화면 상단이나 하단 가장자리에 닿아도 안드로이드 시스템 바가 나타나지 않습니다. 뒤로가기를 눌러 일시적으로 해제할 수 있으며, 데스크톱 화면을 클릭하면 다시 캡처됩니다. 화면 터치 입력에는 영향을 주지 않습니다.</string>
+    <string name="pointer_capture_released">외부 포인터가 해제되었습니다. 데스크톱 화면을 클릭하면 다시 캡처됩니다.</string>
+    <string name="mouse_sensitivity_label">터치패드 포인터 감도 (가속)</string>
+    <string name="mouse_accel_value">%1$.1fx</string>
+    <string name="scroll_reverse_switch">스크롤 방향 반전</string>
+    <string name="scroll_reverse_hint">켜짐: 콘텐츠가 손가락을 따라 움직입니다("자연스러운" 스크롤). 화면과 실제 터치패드의 두 손가락 스크롤 모두에 적용됩니다.</string>
+    <string name="scroll_speed_label">두 손가락 스크롤 속도</string>
+    <string name="scroll_speed_value">%1$.2f</string>
+    <string name="threshold_factor_value">터치 슬롭의 %1$.2f배</string>
+    <string name="scroll_threshold_label">스크롤 감지 임계값</string>
+    <string name="scroll_threshold_hint">손가락이 얼마나 움직여야 스크롤로 인식할지 설정합니다. 핀치 동작이 스크롤로 잘못 인식된다면 이 값을 낮추세요.</string>
+    <string name="move_threshold_label">제스처 확정 임계값</string>
+    <string name="move_threshold_hint">모호한 두 손가락 제스처를 판별하기까지 선행 손가락이 이동해야 하는 거리입니다. 스크롤이 느리게 시작된다면 이 값을 낮추세요.</string>
+    <string name="gesture_scale_label">제스처 크기</string>
+    <string name="gesture_scale_value">%1$.0f px</string>
+    <string name="gesture_scale_hint">터치로 전달되는 제스처(핀치, 세 손가락 이상)는 포인터를 중심으로 이 크기의 정사각형 영역에 매핑됩니다. 값이 클수록 같은 손가락 움직임이 더 멀리 이동합니다.</string>
+    <string name="disable_multi_finger_switch">핀치 및 다중 손가락 제스처 비활성화</string>
+    <string name="disable_multi_finger_hint">켜짐: 두 손가락 핀치/확대축소 및 세 손가락 이상의 제스처가 무시되어 데스크톱에 전달되지 않습니다. 두 손가락 스크롤과 두 손가락 우클릭은 계속 작동합니다. 꺼짐: 핀치 및 다중 손가락 제스처가 터치로 데스크톱에 전달됩니다.</string>
+
+    <!-- Connection -->
+    <string name="socket_path_label">데몬 소켓 경로</string>
+    <string name="second_window_label">두 번째 창 열기 (별도 데몬 및 제목)</string>
+    <string name="second_window_name_hint">창 이름 (예: work)</string>
+    <string name="second_window_open">두 번째 창 열기</string>
+    <string name="root_switch">루트로 연결 (헬퍼)</string>
+    <string name="root_hint">소켓에 연결하여 연결을 앱으로 전달하는 루트 헬퍼(su)를 실행합니다. 다음 연결 시(앱을 다시 열 때) 적용됩니다.</string>
+    <string name="mic_switch">마이크를 데스크톱으로 전달</string>
+    <string name="mic_hint">데스크톱 오디오는 항상 이 기기의 스피커로 재생됩니다. 이 옵션을 켜면 마이크도 반대 방향으로 전송됩니다. 다음 연결 시(앱을 다시 열 때) 적용됩니다.</string>
+    <string name="camera_switch">카메라를 데스크톱으로 전달</string>
+    <string name="camera_hint">데스크톱에서 이 기기의 카메라를 영상 소스로 열 수 있게 합니다. 카메라는 데스크톱이 실제로 녹화 중일 때만 켜집니다. 앱으로 다음에 돌아올 때 적용되며, 처음 사용 시 카메라 권한을 요청합니다.</string>
+    <string name="audio_keepalive_switch">오디오 유지 활성화</string>
+    <string name="audio_keepalive_hint">오디오 출력 스트림을 계속 실행하여 짧은 리눅스 소리(볼륨 조절음, 키 클릭음)가 항상 즉시 재생되도록 합니다. 대기 전력을 약간 더 소모합니다. 꺼짐: 데스크톱이 약 1.5초간 무음이면 오디오 경로가 절전 상태로 전환되고 다음 소리 재생 시 깨어납니다. 재생 지연이 원하는 대로 맞지 않는다면 아래의 오디오 지연시간 프리셋을 조정하세요.</string>
+    <string name="audio_latency_title">오디오 지연시간</string>
+    <string name="latency_speaker_label">스피커 (데스크톱 → 휴대폰)</string>
+    <string name="latency_mic_label">마이크 (휴대폰 → 데스크톱)</string>
+    <string name="latency_hint">낮은 프리셋일수록 지연시간은 줄지만, 기기 부하가 클 경우 잡음이나 끊김이 발생할 수 있습니다. 데스크톱 화면으로 돌아가면 적용됩니다.</string>
+
+    <!-- Resolution -->
+    <string name="width_hint">너비 (예: 1920)</string>
+    <string name="height_hint">높이 (예: 1080)</string>
+    <string name="resolution_hint">프리셋을 선택하거나 값을 직접 입력하세요. 0으로 두면 네이티브 해상도로 설정됩니다. "화면 배율"은 이 기기의 패널(가로 모드)을 배율 조정합니다. 다음 연결 시 적용됩니다.</string>
+    <string name="auto_stretch_switch">디스플레이 자동 늘림</string>
+    <string name="auto_stretch_hint">켜짐: 필요한 경우 화면을 늘려서 디스플레이가 화면을 가득 채웁니다. 꺼짐: 디스플레이가 지정한 해상도의 화면 비율을 유지하며 검은 여백(레터박스)이 생깁니다. 입력 좌표는 자동으로 매핑됩니다.</string>
+
+    <!-- Settings notification -->
+    <string name="notification_switch">설정 알림 표시</string>
+    <string name="notification_hint">앱이 열려 있는 동안 지속되는 알림을 표시하며, 탭하면 바로 설정으로 이동합니다. 끄면 알림이 숨겨집니다. 앱으로 다음에 돌아올 때 적용됩니다.</string>
+    <string name="notification_channel_name">Anland</string>
+    <string name="notification_channel_desc">Anland 빠른 접근</string>
+    <string name="notification_title">Anland</string>
+    <string name="notification_text">탭하여 설정 열기</string>
+
+    <!-- Toasts -->
+    <string name="toast_no_picker">사용 가능한 파일 선택기가 없습니다</string>
+    <string name="toast_read_failed">파일을 읽을 수 없습니다</string>
+
+    <!-- Hardware key names -->
+    <string name="key_volume_up">볼륨 업</string>
+    <string name="key_volume_down">볼륨 다운</string>
+    <string name="key_volume_mute">볼륨 음소거</string>
+    <string name="key_power">전원</string>
+    <string name="key_camera">카메라</string>
+    <string name="key_headset_hook">헤드셋 훅</string>
+    <string name="key_media_play_pause">미디어 재생/일시정지</string>
+    <string name="key_media_next">미디어 다음</string>
+    <string name="key_media_previous">미디어 이전</string>
+    <string name="key_brightness_up">밝기 업</string>
+    <string name="key_brightness_down">밝기 다운</string>
+    <string name="key_home">홈</string>
+    <string name="key_back">뒤로</string>
+
+    <!-- Audio latency presets -->
+    <string-array name="latency_labels">
+        <item>자동 (엔진 기본값)</item>
+        <item>초저지연 (~1 ms)</item>
+        <item>낮음 (~3 ms)</item>
+        <item>균형 (~5 ms)</item>
+        <item>안전 (~10 ms)</item>
+        <item>여유 (~20 ms)</item>
+    </string-array>
+
+    <!-- Resolution presets -->
+    <string-array name="res_preset_labels">
+        <item>프리셋…</item>
+        <item>자동 (0×0, 네이티브)</item>
+        <item>4K (3840×2160)</item>
+        <item>2K (2560×1440)</item>
+        <item>1080p (1920×1080)</item>
+        <item>720p (1280×720)</item>
+        <item>480p (854×480)</item>
+        <item>화면 × 1.0</item>
+        <item>화면 × 0.8</item>
+        <item>화면 × 0.75</item>
+        <item>화면 × 0.5</item>
+        <item>화면 × 0.25</item>
+    </string-array>
+</resources>
