@@ -69,6 +69,12 @@ struct audio_bridge {
      * so the audio path can sleep. */
     volatile bool keepalive_enabled;
 
+    /* User "system effects" toggle. On: desktop audio goes through Android's
+     * effects chain (Dolby etc.), which requires a non-MMAP AAudio stream. Off
+     * (default): direct MMAP output, bypassing the mixer/effects for the lowest
+     * latency. Set via audio_set_effects(); forces a play-stream reopen. */
+    volatile bool route_through_effects;
+
     /*
      * Playback is pull-driven by an AAudio data callback. The socket thread only
      * appends incoming PCM to this ring; the callback feeds an inaudible keepalive
@@ -334,9 +340,25 @@ static AAudioStream *open_stream(struct audio_bridge *bridge,
     AAudioStreamBuilder_setSharingMode(bld, AAUDIO_SHARING_MODE_SHARED);
 
     if (dir == AAUDIO_DIRECTION_OUTPUT) {
+        /* MMAP streams bypass AudioFlinger and therefore the system effects chain
+         * (Dolby Atmos etc.). When the user enables system effects, force the
+         * legacy (non-MMAP) route so the mixer/effects are applied. */
+        /* When system effects are requested, allocate an audio session ID so the
+         * stream is routed through the AudioFlinger mixer/effects chain (Dolby
+         * Atmos etc.). MMAP direct output stays the default for low latency. */
+        if (bridge->route_through_effects)
+            AAudioStreamBuilder_setSessionId(bld, AAUDIO_SESSION_ID_ALLOCATE);
         AAudioStreamBuilder_setUsage(bld, AAUDIO_USAGE_MEDIA);
         AAudioStreamBuilder_setContentType(bld, AAUDIO_CONTENT_TYPE_MUSIC);
-        AAudioStreamBuilder_setPerformanceMode(bld, AAUDIO_PERFORMANCE_MODE_NONE);
+        /* When routed through the system effects chain, ask for POWER_SAVING so
+         * AAudio does not request the FAST mixer thread. Dolby/MiSound effects
+         * are attached to the deep-buffer output, and a FAST stream would skip
+         * that chain entirely (observed on Turbo 4 Pro: effects stream landed
+         * on AudioOut_D while Dolby only processed AudioOut_15). */
+        AAudioStreamBuilder_setPerformanceMode(
+            bld, bridge->route_through_effects
+                     ? AAUDIO_PERFORMANCE_MODE_POWER_SAVING
+                     : AAUDIO_PERFORMANCE_MODE_NONE);
         AAudioStreamBuilder_setDataCallback(bld, play_data_cb, bridge);
         AAudioStreamBuilder_setErrorCallback(bld, play_error_cb, bridge);
     } else {
@@ -764,4 +786,16 @@ void audio_set_keepalive(audio_bridge *b, int enabled)
         return;
     b->keepalive_enabled = enabled != 0;
     LOGI("audio keep-alive %s", b->keepalive_enabled ? "enabled" : "disabled");
+}
+
+void audio_set_effects(audio_bridge *b, int enabled)
+{
+    if (!b)
+        return;
+    b->route_through_effects = enabled != 0;
+    /* Rebuild the output stream on the playback thread so the new route (direct
+     * vs through the system effects chain) applies without a reconnect. */
+    if (b->play)
+        b->play_error = true;
+    LOGI("audio route: %s", b->route_through_effects ? "system effects" : "direct output");
 }
